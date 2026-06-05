@@ -810,10 +810,12 @@ const SplitNodeView = defineComponent({
           return h(TerminalPane, {
             pane,
             focusState: getPaneFocusState(pane.id),
+            platform: platform.value,
             onFocus: focusPane,
             onSwitchTab: switchTab,
             onCloseTab: closeTab,
-            onCreateTab: createTerminalTabInPane
+            onCreateTab: createTerminalTabInPane,
+            onSplitPane: splitFocusedPane
           })
         }
         const tab = getActiveFileTab(pane)

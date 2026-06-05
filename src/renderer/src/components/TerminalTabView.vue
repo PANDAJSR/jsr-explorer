@@ -3,11 +3,21 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getPathLabel } from '../file-manager/formatters'
-import type { TerminalTabState } from '../file-manager/types'
+import type { Platform, SplitDirection, TerminalTabState } from '../file-manager/types'
+
+export type TerminalShortcut =
+  | { type: 'create-tab' }
+  | { type: 'close-tab' }
+  | { type: 'split-pane'; direction: SplitDirection; kind: 'files' | 'terminal' }
 
 const props = defineProps<{
   tab: TerminalTabState
   active: boolean
+  platform: Platform
+}>()
+
+const emit = defineEmits<{
+  shortcut: [shortcut: TerminalShortcut]
 }>()
 
 const container = ref<HTMLElement | null>(null)
@@ -30,6 +40,44 @@ const fit = (): void => {
   }
 }
 
+const handleTerminalKey = (event: KeyboardEvent): boolean => {
+  if (event.type !== 'keydown') {
+    return true
+  }
+
+  const isPrimaryModifier = props.platform === 'darwin' ? event.metaKey : event.ctrlKey
+
+  if (!isPrimaryModifier || event.altKey) {
+    return true
+  }
+
+  const key = event.key.toLowerCase()
+
+  if (key === 't') {
+    emit('shortcut', { type: 'create-tab' })
+  } else if (key === 'w') {
+    emit('shortcut', { type: 'close-tab' })
+  } else if (key === 'd') {
+    emit('shortcut', {
+      type: 'split-pane',
+      direction: event.shiftKey ? 'vertical' : 'horizontal',
+      kind: 'files'
+    })
+  } else if (key === 's') {
+    emit('shortcut', {
+      type: 'split-pane',
+      direction: event.shiftKey ? 'vertical' : 'horizontal',
+      kind: 'terminal'
+    })
+  } else {
+    return true
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+  return false
+}
+
 onMounted(async () => {
   terminal = new Terminal({
     cursorBlink: true,
@@ -45,6 +93,7 @@ onMounted(async () => {
   })
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
+  terminal.attachCustomKeyEventHandler(handleTerminalKey)
 
   if (!container.value) {
     return

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
 import { getPathLabel } from '../file-manager/formatters'
-import type { FocusState, TerminalPaneState, TerminalTabState } from '../file-manager/types'
-import TerminalTabView from './TerminalTabView.vue'
+import type { FocusState, Platform, SplitDirection, TerminalPaneState, TerminalTabState } from '../file-manager/types'
+import TerminalTabView, { type TerminalShortcut } from './TerminalTabView.vue'
 
 const props = defineProps<{
   pane: TerminalPaneState
   focusState: FocusState
+  platform: Platform
 }>()
 
 const emit = defineEmits<{
@@ -14,6 +15,7 @@ const emit = defineEmits<{
   switchTab: [pane: TerminalPaneState, tabId: string]
   closeTab: [pane: TerminalPaneState, tabId: string]
   createTab: [pane: TerminalPaneState]
+  splitPane: [direction: SplitDirection, kind: 'files' | 'terminal']
 }>()
 
 const activeTab = computed(() => props.pane.tabs.find((tab) => tab.id === props.pane.activeTabId) ?? props.pane.tabs[0])
@@ -30,6 +32,20 @@ const activateTerminal = async (): Promise<void> => {
   emit('focus', props.pane.id)
   await nextTick()
   document.querySelector<HTMLElement>(`[data-terminal-tab-id="${activeTab.value?.id}"]`)?.focus()
+}
+
+const handleTerminalShortcut = (shortcut: TerminalShortcut): void => {
+  if (shortcut.type === 'create-tab') {
+    emit('createTab', props.pane)
+    return
+  }
+
+  if (shortcut.type === 'close-tab') {
+    emit('closeTab', props.pane, props.pane.activeTabId)
+    return
+  }
+
+  emit('splitPane', shortcut.direction, shortcut.kind)
 }
 </script>
 
@@ -76,7 +92,9 @@ const activateTerminal = async (): Promise<void> => {
         :key="paneTab.id"
         :tab="paneTab"
         :active="pane.activeTabId === paneTab.id"
+        :platform="platform"
         v-show="pane.activeTabId === paneTab.id"
+        @shortcut="handleTerminalShortcut"
       />
       <div v-if="activeTab?.exitMessage" class="terminal-exit">{{ activeTab.exitMessage }}</div>
     </section>
