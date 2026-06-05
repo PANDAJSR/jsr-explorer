@@ -13,6 +13,8 @@ type PathSegment = {
 
 type PaneState = {
   id: string
+  isClosing: boolean
+  enterFrom: 'right' | 'bottom' | null
   currentPath: string
   parentPath: string | null
   entries: FileManagerEntry[]
@@ -227,7 +229,10 @@ const submitPathEditing = (): void => {
     class="file-pane"
     :class="{
       'is-active': focusState === 'primary',
-      'is-secondary': focusState === 'secondary'
+      'is-secondary': focusState === 'secondary',
+      'is-closing': pane.isClosing,
+      'is-entering-from-right': pane.enterFrom === 'right',
+      'is-entering-from-bottom': pane.enterFrom === 'bottom'
     }"
     :data-pane-id="pane.id"
     @mousedown="emit('focus', pane.id)"

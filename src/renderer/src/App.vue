@@ -10,6 +10,8 @@ type MoveDirection = 'left' | 'right' | 'up' | 'down'
 
 type PaneState = {
   id: string
+  isClosing: boolean
+  enterFrom: 'right' | 'bottom' | null
   currentPath: string
   parentPath: string | null
   entries: FileManagerEntry[]
@@ -54,6 +56,8 @@ let stopColumnResize: (() => void) | null = null
 
 const createPane = (directoryPath: string): PaneState => ({
   id: `pane-${nextPaneId++}`,
+  isClosing: false,
+  enterFrom: null,
   currentPath: directoryPath,
   parentPath: null,
   entries: [],
@@ -94,7 +98,7 @@ const getPaneFocusState = (paneId: string): 'primary' | 'secondary' | 'none' => 
 }
 
 const focusPane = (paneId: string): void => {
-  if (!panes[paneId] || paneId === focusedPaneId.value) {
+  if (!panes[paneId] || panes[paneId].isClosing || paneId === focusedPaneId.value) {
     return
   }
 
@@ -293,6 +297,7 @@ const splitFocusedPane = (direction: SplitDirection): void => {
   }
 
   const newPane = createPane(sourcePane.currentPath)
+  newPane.enterFrom = direction === 'horizontal' ? 'right' : 'bottom'
   newPane.parentPath = sourcePane.parentPath
   newPane.entries = [...sourcePane.entries]
   panes[newPane.id] = reactive(newPane) as PaneState
@@ -313,28 +318,39 @@ const splitFocusedPane = (direction: SplitDirection): void => {
   })
 
   focusPane(newPane.id)
+
+  window.setTimeout(() => {
+    if (panes[newPane.id]) {
+      panes[newPane.id].enterFrom = null
+    }
+  }, 220)
 }
 
 const closeFocusedPane = (): void => {
   const paneId = focusedPaneId.value
   const paneIds = Object.keys(panes)
 
-  if (paneIds.length <= 1 || !paneId) {
+  if (paneIds.length <= 1 || !paneId || panes[paneId]?.isClosing) {
     return
   }
 
-  const nextRootNode = removePaneNode(rootNode.value, paneId)
+  panes[paneId].isClosing = true
 
-  if (!nextRootNode) {
-    return
-  }
+  window.setTimeout(() => {
+    const nextRootNode = removePaneNode(rootNode.value, paneId)
 
-  rootNode.value = nextRootNode
-  delete panes[paneId]
+    if (!nextRootNode) {
+      panes[paneId].isClosing = false
+      return
+    }
 
-  const preferredPaneId = secondaryPaneId.value && panes[secondaryPaneId.value] ? secondaryPaneId.value : null
-  focusedPaneId.value = preferredPaneId ?? findFirstPaneId(rootNode.value)
-  secondaryPaneId.value = null
+    rootNode.value = nextRootNode
+    delete panes[paneId]
+
+    const preferredPaneId = secondaryPaneId.value && panes[secondaryPaneId.value] ? secondaryPaneId.value : null
+    focusedPaneId.value = preferredPaneId ?? findFirstPaneId(rootNode.value)
+    secondaryPaneId.value = null
+  }, 180)
 }
 
 const moveFocus = (direction: MoveDirection): void => {
@@ -355,11 +371,14 @@ const moveFocus = (direction: MoveDirection): void => {
       const centerY = rect.top + rect.height / 2
       const horizontalDistance = centerX - focusedCenterX
       const verticalDistance = centerY - focusedCenterY
+      const pane = panes[element.dataset.paneId ?? '']
       const isCandidate =
-        (direction === 'left' && horizontalDistance < 0) ||
-        (direction === 'right' && horizontalDistance > 0) ||
-        (direction === 'up' && verticalDistance < 0) ||
-        (direction === 'down' && verticalDistance > 0)
+        Boolean(pane) &&
+        !pane.isClosing &&
+        ((direction === 'left' && horizontalDistance < 0) ||
+          (direction === 'right' && horizontalDistance > 0) ||
+          (direction === 'up' && verticalDistance < 0) ||
+          (direction === 'down' && verticalDistance > 0))
 
       return {
         paneId: element.dataset.paneId ?? '',
