@@ -1,8 +1,8 @@
 import { constants } from 'node:fs'
-import { copyFile, readdir, stat } from 'node:fs/promises'
+import { copyFile, cp, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
 
 type FileManagerEntry = {
   name: string
@@ -44,6 +44,37 @@ const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: st
   }
 
   throw new Error(`Could not find an available name for ${originalName}`)
+}
+
+const fallbackDragIcon = nativeImage.createFromDataURL(
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lkR6WQAAAABJRU5ErkJggg=='
+)
+
+const copyPathToDirectory = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
+  const sourceStats = await stat(sourcePath)
+  const destinationStats = await stat(destinationDirectory)
+
+  if (!sourceStats.isFile() && !sourceStats.isDirectory()) {
+    throw new Error('Only files and folders can be copied.')
+  }
+
+  if (!destinationStats.isDirectory()) {
+    throw new Error(`${destinationDirectory} is not a directory`)
+  }
+
+  const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
+
+  if (sourceStats.isDirectory()) {
+    await cp(sourcePath, destinationPath, {
+      errorOnExist: true,
+      force: false,
+      recursive: true
+    })
+  } else {
+    await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+  }
+
+  return destinationPath
 }
 
 const registerFileManagerHandlers = (): void => {
@@ -111,22 +142,37 @@ const registerFileManagerHandlers = (): void => {
     return icon.toDataURL()
   })
 
-  ipcMain.handle('file-manager:copy-file-to-directory', async (_, sourcePath: string, destinationDirectory: string) => {
-    const sourceStats = await stat(sourcePath)
-    const destinationStats = await stat(destinationDirectory)
+  ipcMain.handle('file-manager:copy-paths-to-directory', async (_, sourcePaths: string[], destinationDirectory: string) => {
+    const copiedPaths: string[] = []
 
-    if (!sourceStats.isFile()) {
-      throw new Error('Only files can be copied.')
+    for (const sourcePath of sourcePaths) {
+      copiedPaths.push(await copyPathToDirectory(sourcePath, destinationDirectory))
     }
 
-    if (!destinationStats.isDirectory()) {
-      throw new Error(`${destinationDirectory} is not a directory`)
+    return copiedPaths
+  })
+
+  ipcMain.on('file-manager:start-native-drag', async (event, sourcePaths: string[]) => {
+    const validPaths = sourcePaths.filter(Boolean)
+
+    if (validPaths.length === 0) {
+      return
     }
 
-    const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
-    await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
-
-    return destinationPath
+    try {
+      const icon = await app.getFileIcon(validPaths[0], { size: 'normal' })
+      event.sender.startDrag({
+        file: validPaths[0],
+        files: validPaths,
+        icon: icon.isEmpty() ? fallbackDragIcon : icon
+      })
+    } catch {
+      event.sender.startDrag({
+        file: validPaths[0],
+        files: validPaths,
+        icon: fallbackDragIcon
+      })
+    }
   })
 
   ipcMain.handle('file-manager:get-platform', () => process.platform)

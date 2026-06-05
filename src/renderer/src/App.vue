@@ -499,28 +499,41 @@ const copySelectedFileToSecondaryPane = async (): Promise<void> => {
     .filter((entry): entry is FileManagerEntry => Boolean(entry))
 
   if (selectedEntries.length === 0) {
-    sourcePane.errorMessage = 'No file selected.'
-    return
-  }
-
-  if (selectedEntries.some((entry) => entry.type !== 'file')) {
-    sourcePane.errorMessage = 'Only files can be copied.'
+    sourcePane.errorMessage = 'No item selected.'
     return
   }
 
   try {
-    const copiedPaths: string[] = []
-
-    for (const entry of selectedEntries) {
-      copiedPaths.push(await window.electron.fileManager.copyFileToDirectory(entry.path, targetPane.currentPath))
-    }
-
+    const copiedPaths = await window.electron.fileManager.copyPathsToDirectory(
+      selectedEntries.map((entry) => entry.path),
+      targetPane.currentPath
+    )
     await loadDirectory(targetPane, targetPane.currentPath, false)
     targetPane.selectedPaths = copiedPaths
     targetPane.activePath = copiedPaths.at(-1) ?? null
     targetPane.selectionAnchorPath = copiedPaths[0] ?? null
   } catch (error) {
     sourcePane.errorMessage = error instanceof Error ? error.message : 'Unable to copy file.'
+  }
+}
+
+const copyDroppedPathsToPane = async (pane: PaneState, sourcePaths: string[]): Promise<void> => {
+  const filteredPaths = [...new Set(sourcePaths.filter(Boolean))]
+
+  if (filteredPaths.length === 0) {
+    return
+  }
+
+  pane.errorMessage = ''
+
+  try {
+    const copiedPaths = await window.electron.fileManager.copyPathsToDirectory(filteredPaths, pane.currentPath)
+    await loadDirectory(pane, pane.currentPath, false)
+    pane.selectedPaths = copiedPaths
+    pane.activePath = copiedPaths.at(-1) ?? null
+    pane.selectionAnchorPath = copiedPaths[0] ?? null
+  } catch (error) {
+    pane.errorMessage = error instanceof Error ? error.message : 'Unable to copy dropped items.'
   }
 }
 
@@ -637,7 +650,8 @@ const SplitNodeView = defineComponent({
           onGoForward: goForward,
           onGoUp: goUp,
           onSetSort: setSort,
-          onResizeColumn: startColumnResize
+          onResizeColumn: startColumnResize,
+          onDropPaths: copyDroppedPathsToPane
         })
       }
 

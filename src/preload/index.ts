@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('electron', {
   fileManager: {
@@ -8,8 +8,10 @@ contextBridge.exposeInMainWorld('electron', {
     getParentDirectory: (directoryPath: string) =>
       ipcRenderer.invoke('file-manager:get-parent-directory', directoryPath),
     getFileIcon: (targetPath: string) => ipcRenderer.invoke('file-manager:get-file-icon', targetPath),
-    copyFileToDirectory: (sourcePath: string, destinationDirectory: string) =>
-      ipcRenderer.invoke('file-manager:copy-file-to-directory', sourcePath, destinationDirectory),
+    copyPathsToDirectory: (sourcePaths: string[], destinationDirectory: string) =>
+      ipcRenderer.invoke('file-manager:copy-paths-to-directory', sourcePaths, destinationDirectory),
+    startNativeDrag: (sourcePaths: string[]) => ipcRenderer.send('file-manager:start-native-drag', sourcePaths),
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
     getPlatform: () => ipcRenderer.invoke('file-manager:get-platform')
   }
 })

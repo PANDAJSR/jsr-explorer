@@ -11,6 +11,8 @@ type PathSegment = {
   path: string
 }
 
+const dragMimeType = 'application/x-jsr-explorer-paths'
+
 type PaneState = {
   id: string
   isClosing: boolean
@@ -49,6 +51,7 @@ const emit = defineEmits<{
   goUp: [pane: PaneState]
   setSort: [pane: PaneState, key: SortKey]
   resizeColumn: [event: MouseEvent, column: ColumnKey]
+  dropPaths: [pane: PaneState, paths: string[]]
 }>()
 
 const pathInput = ref<HTMLInputElement | null>(null)
@@ -258,6 +261,79 @@ const selectEntry = (event: MouseEvent, entry: FileManagerEntry): void => {
   selectSingleEntry(entry)
 }
 
+const ensureDraggedEntryIsSelected = (entry: FileManagerEntry): void => {
+  if (props.pane.selectedPaths.includes(entry.path)) {
+    return
+  }
+
+  selectSingleEntry(entry)
+}
+
+const getDraggedPaths = (entry: FileManagerEntry): string[] => {
+  if (props.pane.selectedPaths.includes(entry.path)) {
+    return props.pane.selectedPaths
+  }
+
+  return [entry.path]
+}
+
+const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
+  ensureDraggedEntryIsSelected(entry)
+
+  const draggedPaths = getDraggedPaths(entry)
+
+  event.dataTransfer?.setData(dragMimeType, JSON.stringify(draggedPaths))
+  event.dataTransfer?.setData('text/plain', draggedPaths.join('\n'))
+  event.dataTransfer?.setData(
+    'text/uri-list',
+    draggedPaths.map((path) => `file://${encodeURI(path)}`).join('\n')
+  )
+
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'copy'
+  }
+
+  window.electron.fileManager.startNativeDrag(draggedPaths)
+}
+
+const getDroppedPaths = (event: DragEvent): string[] => {
+  const internalPayload = event.dataTransfer?.getData(dragMimeType)
+
+  if (internalPayload) {
+    try {
+      return JSON.parse(internalPayload) as string[]
+    } catch {
+      return []
+    }
+  }
+
+  return [...(event.dataTransfer?.files ?? [])]
+    .map((file) => window.electron.fileManager.getPathForFile(file))
+    .filter(Boolean)
+}
+
+const handlePaneDragOver = (event: DragEvent): void => {
+  if (!event.dataTransfer) {
+    return
+  }
+
+  if (event.dataTransfer.types.includes(dragMimeType) || event.dataTransfer.types.includes('Files')) {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const handlePaneDrop = (event: DragEvent): void => {
+  const droppedPaths = getDroppedPaths(event)
+
+  if (droppedPaths.length === 0) {
+    return
+  }
+
+  event.preventDefault()
+  emit('dropPaths', props.pane, droppedPaths)
+}
+
 const startPathEditing = async (): Promise<void> => {
   props.pane.editablePath = props.pane.currentPath
   props.pane.isEditingPath = true
@@ -294,6 +370,8 @@ const submitPathEditing = (): void => {
     }"
     :data-pane-id="pane.id"
     @mousedown="emit('focus', pane.id)"
+    @dragover="handlePaneDragOver"
+    @drop="handlePaneDrop"
   >
     <header class="toolbar">
       <div class="navigation">
@@ -383,9 +461,11 @@ const submitPathEditing = (): void => {
           class="file-row file-grid"
           :class="{ selected: pane.selectedPaths.includes(entry.path), active: pane.activePath === entry.path }"
           type="button"
+          draggable="true"
           :style="columnStyle"
           @click="selectEntry($event, entry)"
           @dblclick="emit('openEntry', pane, entry)"
+          @dragstart="startEntryDrag($event, entry)"
         >
           <span class="file-cell name-cell">
             <span v-if="entry.type === 'directory'" class="folder-icon" aria-hidden="true">
