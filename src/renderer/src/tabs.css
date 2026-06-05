@@ -1,0 +1,68 @@
+.tab-strip {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 34px;
+  padding: 5px 8px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #e7ebf0;
+  border-bottom: 1px solid #cfd7df;
+}
+
+.file-pane.is-secondary .tab-strip {
+  background: #e3eefb;
+}
+
+.file-pane.is-active .tab-strip {
+  background: #dbeafe;
+}
+
+.tab-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 190px;
+  min-width: 92px;
+  height: 29px;
+  padding: 0 7px 0 10px;
+  color: #536170;
+  background: #d6dde5;
+  border: 1px solid #c5ced8;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  color: #1f2933;
+  background: #ffffff;
+}
+
+.file-pane.is-active .tab-button.active {
+  background: #f8fbff;
+}
+
+.tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  display: grid;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  color: #6b7785;
+  border-radius: 50%;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  color: #1f2933;
+  background: #cbd5df;
+}
