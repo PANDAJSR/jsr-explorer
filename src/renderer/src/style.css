@@ -21,6 +21,41 @@ button {
   font: inherit;
 }
 
+.primary-button,
+.secondary-button {
+  min-width: 76px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.primary-button {
+  color: #ffffff;
+  background: #1f6feb;
+  border: 1px solid #1b5fc9;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: #195fcf;
+}
+
+.primary-button:disabled {
+  background: #9cb9e6;
+  border-color: #9cb9e6;
+  cursor: default;
+}
+
+.secondary-button {
+  color: #28333f;
+  background: #ffffff;
+  border: 1px solid #c8d0d9;
+}
+
+.secondary-button:hover {
+  background: #e7eef5;
+}
+
 .file-manager {
   display: flex;
   width: 100%;
@@ -29,6 +64,56 @@ button {
   min-height: 520px;
   padding: 4px;
   background: #fbfcfd;
+}
+
+.name-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(31 41 51 / 28%);
+}
+
+.name-dialog {
+  display: flex;
+  width: min(420px, 100%);
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #c8d0d9;
+  border-radius: 7px;
+  box-shadow: 0 16px 48px rgb(31 41 51 / 22%);
+}
+
+.name-dialog-label {
+  color: #25313d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name-dialog-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  color: #25313d;
+  border: 1px solid #c8d0d9;
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  font: inherit;
+}
+
+.name-dialog-input:focus {
+  border-color: #73a7f7;
+  outline-color: #c9ddff;
+}
+
+.name-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .split-node {

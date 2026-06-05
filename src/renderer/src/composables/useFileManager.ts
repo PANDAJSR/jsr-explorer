@@ -1,6 +1,7 @@
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, type PropType } from 'vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import FilePane from '../components/FilePane.vue'
+import NameDialog from '../components/NameDialog.vue'
 import {
   copySelectionToClipboard,
   copySelectionToSecondary,
@@ -33,6 +34,11 @@ const contextMenu = ref<{
   x: number
   y: number
 } | null>(null)
+const nameDialog = ref<{
+  defaultValue: string
+  resolve: (value: string | null) => void
+  title: string
+} | null>(null)
 const { cloneTabForPath, createPane } = createStateFactory()
 const initialPane = createPane('')
 panes[initialPane.id] = initialPane
@@ -58,6 +64,25 @@ const focusPane = (paneId: string): void => {
 }
 const hideContextMenu = (): void => {
   contextMenu.value = null
+}
+const requestName = (title: string, defaultValue = ''): Promise<string | null> =>
+  new Promise((resolve) => {
+    nameDialog.value?.resolve(null)
+    nameDialog.value = {
+      defaultValue,
+      resolve,
+      title
+    }
+  })
+const closeNameDialog = (value: string | null): void => {
+  const dialog = nameDialog.value
+
+  if (!dialog) {
+    return
+  }
+
+  nameDialog.value = null
+  dialog.resolve(value)
 }
 const switchTab = (pane: PaneState, tabId: string): void => {
   pane.activeTabId = pane.tabs.some((tab) => tab.id === tabId) ? tabId : pane.activeTabId
@@ -340,10 +365,10 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
       { label: '复制', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void copySelectionToClipboard(tab)) },
       { label: '剪切', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void cutSelectionToClipboard(tab)) },
       { label: '复制并粘贴', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void duplicateSelection(tab, loadDirectory)) },
-      { label: '重命名', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory)) },
+      { label: '重命名', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory, requestName)) },
       { label: '删除', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void trashSelection(tab, loadDirectory)) },
       { label: '粘贴', enabled: true, action: wrap(() => void pasteClipboardIntoTab(tab, loadDirectory)) },
-      { label: '新建文件夹', enabled: true, action: wrap(() => void createFolder(tab, loadDirectory)) }
+      { label: '新建文件夹', enabled: true, action: wrap(() => void createFolder(tab, loadDirectory, requestName)) }
     ]
   }
 }
@@ -358,10 +383,10 @@ const handleKeydown = createKeyboardHandler(platform, {
   goUp: () => void goUp(),
   moveFocus,
   moveSelection,
-  newFolder: () => runOnFocusedTab((tab) => createFolder(tab, loadDirectory)),
+  newFolder: () => runOnFocusedTab((tab) => createFolder(tab, loadDirectory, requestName)),
   openSelected: () => void openSelected(),
   paste: () => runOnFocusedTab((tab) => pasteClipboardIntoTab(tab, loadDirectory)),
-  rename: () => runOnFocusedTab((tab) => renameActiveItem(tab, loadDirectory)),
+  rename: () => runOnFocusedTab((tab) => renameActiveItem(tab, loadDirectory, requestName)),
   splitPane: splitFocusedPane,
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
@@ -432,7 +457,11 @@ onBeforeUnmount(() => {
 return {
   ContextMenu,
   contextMenu,
+  cancelNameDialog: () => closeNameDialog(null),
+  NameDialog,
+  nameDialog,
   rootNode,
+  submitNameDialog: (value: string) => closeNameDialog(value),
   SplitNodeView
 }
 }

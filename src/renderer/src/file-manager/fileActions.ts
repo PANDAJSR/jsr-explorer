@@ -1,6 +1,7 @@
 import type { FileTabState } from './types'
 
 type LoadDirectory = (tab: FileTabState, directoryPath: string, pushHistory?: boolean) => Promise<void>
+type RequestName = (message: string, defaultValue?: string) => Promise<string | null>
 
 const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
   tab.selectedPaths
@@ -14,11 +15,6 @@ const refreshAndSelect = async (tab: FileTabState, paths: string[], loadDirector
   tab.selectedPaths = paths
   tab.activePath = paths.at(-1) ?? null
   tab.selectionAnchorPath = paths[0] ?? null
-}
-
-const askName = (message: string, defaultValue = ''): string | null => {
-  const name = window.prompt(message, defaultValue)?.trim()
-  return name || null
 }
 
 export const copySelectionToClipboard = async (tab: FileTabState): Promise<void> => {
@@ -68,7 +64,11 @@ export const duplicateSelection = async (tab: FileTabState, loadDirectory: LoadD
   }
 }
 
-export const renameActiveItem = async (tab: FileTabState, loadDirectory: LoadDirectory): Promise<void> => {
+export const renameActiveItem = async (
+  tab: FileTabState,
+  loadDirectory: LoadDirectory,
+  requestName: RequestName
+): Promise<void> => {
   const activeEntry = tab.entries.find((entry) => entry.path === tab.activePath)
 
   if (!activeEntry) {
@@ -76,7 +76,7 @@ export const renameActiveItem = async (tab: FileTabState, loadDirectory: LoadDir
     return
   }
 
-  const newName = askName('重命名对象：', activeEntry.name)
+  const newName = await requestName('重命名对象：', activeEntry.name)
 
   if (!newName || newName === activeEntry.name) {
     return
@@ -106,9 +106,15 @@ export const trashSelection = async (tab: FileTabState, loadDirectory: LoadDirec
   }
 }
 
-export const createFolder = async (tab: FileTabState, loadDirectory: LoadDirectory): Promise<void> => {
+export const createFolder = async (
+  tab: FileTabState,
+  loadDirectory: LoadDirectory,
+  requestName: RequestName
+): Promise<void> => {
   const selectedPaths = getSelectedPaths(tab)
-  const folderName = askName(selectedPaths.length > 0 ? '新建文件夹，并将选中对象移入其中：' : '新建文件夹：')
+  const folderName = await requestName(
+    selectedPaths.length > 0 ? '新建文件夹，并将选中对象移入其中：' : '新建文件夹：'
+  )
 
   if (!folderName) {
     return
