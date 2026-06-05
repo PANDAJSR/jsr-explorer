@@ -90,6 +90,7 @@ const nameDialog = ref<{
   title: string
 } | null>(null)
 let stopColumnResize: (() => void) | null = null
+let stopSplitResize: (() => void) | null = null
 let stopDirectoryChanged: (() => void) | null = null
 const { cloneTabForPath, createPane } = createStateFactory()
 const initialPane = createPane('')
@@ -375,6 +376,51 @@ const startColumnResize = (event: MouseEvent, column: ColumnKey): void => {
   document.addEventListener('mousemove', handleMove)
   document.addEventListener('mouseup', handleUp)
 }
+const startSplitResize = (event: MouseEvent, node: Extract<SplitNode, { type: 'split' }>): void => {
+  event.preventDefault()
+  event.stopPropagation()
+
+  const container = (event.currentTarget as HTMLElement).parentElement
+
+  if (!container) {
+    return
+  }
+
+  const minPaneSize = node.direction === 'horizontal' ? 280 : 220
+  const updateRatio = (clientPosition: number): void => {
+    const rect = container.getBoundingClientRect()
+    const size = node.direction === 'horizontal' ? rect.width : rect.height
+    const start = node.direction === 'horizontal' ? rect.left : rect.top
+
+    if (size <= 0) {
+      return
+    }
+
+    const minRatio = Math.min(0.45, minPaneSize / size)
+    const maxRatio = 1 - minRatio
+    const nextRatio = (clientPosition - start) / size
+
+    node.ratio = Math.min(maxRatio, Math.max(minRatio, nextRatio))
+  }
+  const handleMove = (moveEvent: MouseEvent): void => {
+    updateRatio(node.direction === 'horizontal' ? moveEvent.clientX : moveEvent.clientY)
+  }
+  const handleUp = (): void => {
+    document.body.classList.remove('is-resizing-split')
+    document.body.classList.remove('is-resizing-split-horizontal')
+    document.body.classList.remove('is-resizing-split-vertical')
+    document.removeEventListener('mousemove', handleMove)
+    document.removeEventListener('mouseup', handleUp)
+    stopSplitResize = null
+  }
+
+  stopSplitResize?.()
+  stopSplitResize = handleUp
+  document.body.classList.add('is-resizing-split')
+  document.body.classList.add(`is-resizing-split-${node.direction}`)
+  document.addEventListener('mousemove', handleMove)
+  document.addEventListener('mouseup', handleUp)
+}
 const createTabInFocusedPane = (): void => {
   const pane = focusedPane.value
   const tab = focusedTab.value
@@ -400,6 +446,7 @@ const splitFocusedPane = (direction: SplitDirection): void => {
   rootNode.value = replacePaneNode(rootNode.value, sourcePane.id, {
     type: 'split',
     direction,
+    ratio: 0.5,
     children: [
       {
         type: 'pane',
@@ -739,7 +786,37 @@ const SplitNodeView = defineComponent({
         {
           class: ['split-node', `split-node-${node.direction}`]
         },
-        [h(SplitNodeView, { node: node.children[0] }), h(SplitNodeView, { node: node.children[1] })]
+        [
+          h(
+            'div',
+            {
+              class: 'split-child',
+              style: {
+                flex: `${node.ratio} 1 0`
+              }
+            },
+            [h(SplitNodeView, { node: node.children[0] })]
+          ),
+          h('button', {
+            'aria-label': '调整窗格大小',
+            'aria-orientation': node.direction === 'horizontal' ? 'vertical' : 'horizontal',
+            class: ['split-resizer', `split-resizer-${node.direction}`],
+            role: 'separator',
+            title: '拖动调整窗格大小',
+            type: 'button',
+            onMousedown: (event: MouseEvent) => startSplitResize(event, node)
+          }),
+          h(
+            'div',
+            {
+              class: 'split-child',
+              style: {
+                flex: `${1 - node.ratio} 1 0`
+              }
+            },
+            [h(SplitNodeView, { node: node.children[1] })]
+          )
+        ]
       )
     }
   }
@@ -770,6 +847,7 @@ onBeforeUnmount(() => {
   stopWatchedDirectorySync()
   void window.electron.fileManager.watchDirectories([])
   stopColumnResize?.()
+  stopSplitResize?.()
 })
 return {
   ArchiveDialog,

@@ -715,7 +715,6 @@ button {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  gap: 4px;
   transition: gap 180ms ease;
 }
 
@@ -725,6 +724,68 @@ button {
 
 .split-node-vertical {
   flex-direction: column;
+}
+
+.split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-resizer {
+  position: relative;
+  flex: 0 0 6px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+.split-resizer-horizontal {
+  cursor: col-resize;
+}
+
+.split-resizer-vertical {
+  cursor: row-resize;
+}
+
+.split-resizer::after {
+  position: absolute;
+  inset: 1px;
+  background: #c8d0d9;
+  border-radius: 3px;
+  opacity: 0;
+  content: "";
+  transition:
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.split-resizer:hover::after,
+.split-resizer:focus-visible::after,
+.is-resizing-split .split-resizer::after {
+  opacity: 1;
+}
+
+.split-resizer:hover::after,
+.split-resizer:focus-visible::after {
+  background: #8fb8ee;
+}
+
+.is-resizing-split {
+  user-select: none;
+}
+
+.is-resizing-split-horizontal {
+  cursor: col-resize;
+}
+
+.is-resizing-split-vertical {
+  cursor: row-resize;
 }
 
 .file-pane {

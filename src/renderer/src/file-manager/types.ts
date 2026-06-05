@@ -96,5 +96,6 @@ export type SplitNode =
   | {
       type: 'split'
       direction: SplitDirection
+      ratio: number
       children: [SplitNode, SplitNode]
     }
