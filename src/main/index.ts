@@ -1,11 +1,11 @@
-import { constants } from 'node:fs'
+import { constants, watch, type FSWatcher } from 'node:fs'
 import { copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { inflateRawSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
-import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell, type WebContents } from 'electron'
 
 type FileManagerEntry = {
   name: string
@@ -19,6 +19,12 @@ type DirectoryPayload = {
   path: string
   parentPath: string | null
   entries: FileManagerEntry[]
+}
+
+type DirectoryWatcherState = {
+  sender: WebContents
+  timers: Map<string, NodeJS.Timeout>
+  watchers: Map<string, FSWatcher>
 }
 
 type ClipboardMode = 'copy' | 'cut'
@@ -68,6 +74,64 @@ let internalClipboard: {
   mode: ClipboardMode
   paths: string[]
 } | null = null
+
+const directoryWatcherStates = new Map<number, DirectoryWatcherState>()
+
+const closeDirectoryWatcherState = (webContentsId: number): void => {
+  const state = directoryWatcherStates.get(webContentsId)
+
+  if (!state) {
+    return
+  }
+
+  for (const timer of state.timers.values()) {
+    clearTimeout(timer)
+  }
+
+  for (const watcher of state.watchers.values()) {
+    watcher.close()
+  }
+
+  directoryWatcherStates.delete(webContentsId)
+}
+
+const getDirectoryWatcherState = (sender: WebContents): DirectoryWatcherState => {
+  const existingState = directoryWatcherStates.get(sender.id)
+
+  if (existingState) {
+    return existingState
+  }
+
+  const state: DirectoryWatcherState = {
+    sender,
+    timers: new Map(),
+    watchers: new Map()
+  }
+
+  directoryWatcherStates.set(sender.id, state)
+  sender.once('destroyed', () => closeDirectoryWatcherState(sender.id))
+
+  return state
+}
+
+const notifyDirectoryChanged = (state: DirectoryWatcherState, directoryPath: string): void => {
+  const existingTimer = state.timers.get(directoryPath)
+
+  if (existingTimer) {
+    clearTimeout(existingTimer)
+  }
+
+  state.timers.set(
+    directoryPath,
+    setTimeout(() => {
+      state.timers.delete(directoryPath)
+
+      if (!state.sender.isDestroyed()) {
+        state.sender.send('file-manager:directory-changed', directoryPath)
+      }
+    }, 100)
+  )
+}
 
 const getParentPath = (directoryPath: string): string | null => {
   const root = parse(directoryPath).root
@@ -722,6 +786,53 @@ const registerFileManagerHandlers = (): void => {
       path: directoryPath,
       parentPath: getParentPath(directoryPath),
       entries: entries.filter((entry): entry is FileManagerEntry => entry !== null)
+    }
+  })
+
+  ipcMain.handle('file-manager:watch-directories', async (event, directoryPaths: string[]) => {
+    const state = getDirectoryWatcherState(event.sender)
+    const nextDirectoryPaths = new Set(directoryPaths.filter((directoryPath) => directoryPath.length > 0))
+
+    for (const [directoryPath, watcher] of state.watchers) {
+      if (nextDirectoryPaths.has(directoryPath)) {
+        continue
+      }
+
+      watcher.close()
+      state.watchers.delete(directoryPath)
+
+      const timer = state.timers.get(directoryPath)
+      if (timer) {
+        clearTimeout(timer)
+        state.timers.delete(directoryPath)
+      }
+    }
+
+    for (const directoryPath of nextDirectoryPaths) {
+      if (state.watchers.has(directoryPath)) {
+        continue
+      }
+
+      try {
+        const directoryStats = await stat(directoryPath)
+
+        if (!directoryStats.isDirectory()) {
+          continue
+        }
+
+        const watcher = watch(directoryPath, () => {
+          notifyDirectoryChanged(state, directoryPath)
+        })
+
+        watcher.on('error', () => {
+          state.watchers.delete(directoryPath)
+          notifyDirectoryChanged(state, directoryPath)
+        })
+
+        state.watchers.set(directoryPath, watcher)
+      } catch {
+        notifyDirectoryChanged(state, directoryPath)
+      }
     }
   })
 

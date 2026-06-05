@@ -1,9 +1,15 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electron', {
   fileManager: {
     getHomeDirectory: () => ipcRenderer.invoke('file-manager:get-home-directory'),
     listDirectory: (directoryPath: string) => ipcRenderer.invoke('file-manager:list-directory', directoryPath),
+    watchDirectories: (directoryPaths: string[]) => ipcRenderer.invoke('file-manager:watch-directories', directoryPaths),
+    onDirectoryChanged: (handler: (directoryPath: string) => void) => {
+      const listener = (_: IpcRendererEvent, directoryPath: string): void => handler(directoryPath)
+      ipcRenderer.on('file-manager:directory-changed', listener)
+      return () => ipcRenderer.removeListener('file-manager:directory-changed', listener)
+    },
     openPath: (targetPath: string) => ipcRenderer.invoke('file-manager:open-path', targetPath),
     getParentDirectory: (directoryPath: string) =>
       ipcRenderer.invoke('file-manager:get-parent-directory', directoryPath),

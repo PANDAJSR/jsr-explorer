@@ -69,6 +69,8 @@ interface Window {
     fileManager: {
       getHomeDirectory: () => Promise<string>
       listDirectory: (directoryPath: string) => Promise<DirectoryPayload>
+      watchDirectories: (directoryPaths: string[]) => Promise<void>
+      onDirectoryChanged: (handler: (directoryPath: string) => void) => () => void
       openPath: (targetPath: string) => Promise<OpenPathResult>
       getParentDirectory: (directoryPath: string) => Promise<string | null>
       getFileIcon: (targetPath: string) => Promise<string>

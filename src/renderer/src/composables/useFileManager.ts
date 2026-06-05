@@ -1,4 +1,4 @@
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, type PropType } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch, type PropType } from 'vue'
 import ArchiveDialog from '../components/ArchiveDialog.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import FavoritesManager from '../components/FavoritesManager.vue'
@@ -86,6 +86,8 @@ const nameDialog = ref<{
   resolve: (value: string | null) => void
   title: string
 } | null>(null)
+let stopColumnResize: (() => void) | null = null
+let stopDirectoryChanged: (() => void) | null = null
 const { cloneTabForPath, createPane } = createStateFactory()
 const initialPane = createPane('')
 panes[initialPane.id] = initialPane
@@ -100,6 +102,19 @@ const getActiveTab = (pane: PaneState | null): FileTabState | null =>
   pane ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
 const focusedTab = computed(() => getActiveTab(focusedPane.value))
 const secondaryTab = computed(() => getActiveTab(secondaryPane.value))
+const getOpenTabs = (): FileTabState[] => Object.values(panes).flatMap((pane) => pane.tabs)
+const getOpenDirectoryPaths = (): string[] => [
+  ...new Set(getOpenTabs().map((tab) => tab.currentPath).filter((path) => path.length > 0))
+]
+const syncWatchedDirectories = (): void => {
+  window.electron.fileManager.watchDirectories(getOpenDirectoryPaths()).catch((error) => {
+    const tab = focusedTab.value
+
+    if (tab) {
+      tab.errorMessage = error instanceof Error ? error.message : '无法监听文件夹变化。'
+    }
+  })
+}
 const getPaneFocusState = (paneId: string): 'primary' | 'secondary' | 'none' =>
   paneId === focusedPaneId.value ? 'primary' : paneId === secondaryPaneId.value ? 'secondary' : 'none'
 const focusPane = (paneId: string): void => {
@@ -149,6 +164,36 @@ const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
       })
   }
 }
+const applyDirectoryPayload = (
+  tab: FileTabState,
+  payload: DirectoryPayload,
+  options: {
+    preserveSelection: boolean
+    pushHistory: boolean
+  }
+): void => {
+  if (options.pushHistory && tab.currentPath && tab.currentPath !== payload.path) {
+    tab.backStack.push(tab.currentPath)
+    tab.forwardStack = []
+  }
+
+  const entryPaths = new Set(payload.entries.map((entry) => entry.path))
+  const activePath = options.preserveSelection && tab.activePath && entryPaths.has(tab.activePath) ? tab.activePath : null
+  const selectedPaths = options.preserveSelection
+    ? tab.selectedPaths.filter((selectedPath) => entryPaths.has(selectedPath))
+    : []
+
+  tab.currentPath = payload.path
+  tab.parentPath = payload.parentPath
+  tab.entries = payload.entries
+  tab.selectedPaths = selectedPaths
+  tab.activePath = activePath ?? selectedPaths.at(-1) ?? null
+  tab.selectionAnchorPath =
+    tab.selectionAnchorPath && entryPaths.has(tab.selectionAnchorPath)
+      ? tab.selectionAnchorPath
+      : selectedPaths[0] ?? tab.activePath
+  loadFileIcons(payload.entries)
+}
 const loadDirectory = async (tab: FileTabState, directoryPath: string, pushHistory = true): Promise<void> => {
   const sequence = (tab.loadSequence += 1)
   tab.errorMessage = ''
@@ -158,17 +203,7 @@ const loadDirectory = async (tab: FileTabState, directoryPath: string, pushHisto
     if (sequence !== tab.loadSequence) {
       return
     }
-    if (pushHistory && tab.currentPath && tab.currentPath !== payload.path) {
-      tab.backStack.push(tab.currentPath)
-      tab.forwardStack = []
-    }
-    tab.currentPath = payload.path
-    tab.parentPath = payload.parentPath
-    tab.entries = payload.entries
-    tab.selectedPaths = []
-    tab.activePath = null
-    tab.selectionAnchorPath = null
-    loadFileIcons(payload.entries)
+    applyDirectoryPayload(tab, payload, { preserveSelection: false, pushHistory })
   } catch (error) {
     if (sequence === tab.loadSequence) {
       tab.errorMessage = error instanceof Error ? error.message : '无法加载文件夹。'
@@ -176,6 +211,28 @@ const loadDirectory = async (tab: FileTabState, directoryPath: string, pushHisto
   } finally {
     if (sequence === tab.loadSequence) {
       tab.isLoading = false
+    }
+  }
+}
+const refreshDirectory = async (tab: FileTabState, directoryPath: string): Promise<void> => {
+  if (tab.isLoading) {
+    return
+  }
+
+  const sequence = tab.loadSequence
+
+  try {
+    const payload = await window.electron.fileManager.listDirectory(directoryPath)
+
+    if (sequence !== tab.loadSequence || tab.currentPath !== directoryPath) {
+      return
+    }
+
+    tab.errorMessage = ''
+    applyDirectoryPayload(tab, payload, { preserveSelection: true, pushHistory: false })
+  } catch (error) {
+    if (sequence === tab.loadSequence && tab.currentPath === directoryPath) {
+      tab.errorMessage = error instanceof Error ? error.message : '无法刷新文件夹。'
     }
   }
 }
@@ -608,6 +665,10 @@ const handleKeydown = (event: KeyboardEvent): void => {
     }
   }
 }
+const stopWatchedDirectorySync = watch(
+  () => getOpenDirectoryPaths().sort((left, right) => left.localeCompare(right)).join('\n'),
+  syncWatchedDirectories
+)
 const SplitNodeView = defineComponent({
   name: 'SplitNodeView',
   props: {
@@ -659,6 +720,13 @@ const SplitNodeView = defineComponent({
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousedown', hideContextMenu)
+  stopDirectoryChanged = window.electron.fileManager.onDirectoryChanged((directoryPath) => {
+    for (const tab of getOpenTabs()) {
+      if (tab.currentPath === directoryPath) {
+        void refreshDirectory(tab, directoryPath)
+      }
+    }
+  })
   favorites.value = readFavoritePaths()
   platform.value = await window.electron.fileManager.getPlatform()
   const homeDirectory = await window.electron.fileManager.getHomeDirectory()
@@ -671,6 +739,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('mousedown', hideContextMenu)
+  stopDirectoryChanged?.()
+  stopWatchedDirectorySync()
+  void window.electron.fileManager.watchDirectories([])
   stopColumnResize?.()
 })
 return {
