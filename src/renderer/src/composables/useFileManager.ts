@@ -5,6 +5,7 @@ import FavoritesManager from '../components/FavoritesManager.vue'
 import FilePane from '../components/FilePane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import QuickPreview from '../components/QuickPreview.vue'
+import ShortcutHelp from '../components/ShortcutHelp.vue'
 import {
   copySelectionToClipboard,
   copySelectionToSecondary,
@@ -13,6 +14,7 @@ import {
   cutSelectionToClipboard,
   duplicateSelection,
   getSelectedEntries,
+  moveSelectionToSecondary,
   pasteClipboardIntoTab,
   renameActiveItem,
   trashSelection
@@ -64,6 +66,7 @@ const focusedPaneId = ref('')
 const secondaryPaneId = ref<string | null>(null)
 const favorites = ref<FavoritePath[]>([])
 const isFavoritesManagerOpen = ref(false)
+const isShortcutHelpOpen = ref(false)
 const quickPreview = ref<QuickPreviewState | null>(null)
 const archiveDialog = ref<{
   defaultFileName: string
@@ -465,6 +468,11 @@ const copySelectedFileToSecondaryPane = async (): Promise<void> => {
     await copySelectionToSecondary(focusedTab.value, secondaryTab.value, loadDirectory)
   }
 }
+const moveSelectedFileToSecondaryPane = async (): Promise<void> => {
+  if (focusedTab.value) {
+    await moveSelectionToSecondary(focusedTab.value, secondaryTab.value, loadDirectory)
+  }
+}
 const copyDroppedPathsToTab = async (tab: FileTabState, sourcePaths: string[]): Promise<void> => {
   const filteredPaths = [...new Set(sourcePaths.filter(Boolean))]
   if (filteredPaths.length === 0) {
@@ -610,6 +618,7 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   goBack: () => void goBack(),
   goForward: () => void goForward(),
   goUp: () => void goUp(),
+  moveSelectedToSecondary: () => void moveSelectedFileToSecondaryPane(),
   moveFocus,
   moveSelection,
   newFolder: () => runOnFocusedTab((tab) => createFolder(tab, loadDirectory, requestName)),
@@ -620,11 +629,23 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   showFavoritesManager: () => {
     isFavoritesManagerOpen.value = true
   },
+  showShortcutHelp: () => {
+    isShortcutHelpOpen.value = true
+  },
   splitPane: splitFocusedPane,
   jumpToFavorite: jumpToFavoriteIndex,
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
 const handleKeydown = (event: KeyboardEvent): void => {
+  if (isShortcutHelpOpen.value) {
+    if (event.key === 'Escape' || (event.shiftKey && event.code === 'KeyH')) {
+      event.preventDefault()
+      isShortcutHelpOpen.value = false
+    }
+
+    return
+  }
+
   if (archiveDialog.value) {
     return
   }
@@ -652,6 +673,12 @@ const handleKeydown = (event: KeyboardEvent): void => {
   if (event.altKey && event.shiftKey && event.code === 'KeyF') {
     event.preventDefault()
     isFavoritesManagerOpen.value = false
+    return
+  }
+
+  if (event.shiftKey && event.code === 'KeyH') {
+    event.preventDefault()
+    isShortcutHelpOpen.value = true
     return
   }
 
@@ -757,6 +784,7 @@ return {
   favorites,
   focusedTab,
   isFavoritesManagerOpen,
+  isShortcutHelpOpen,
   jumpToFavorite: (favorite: FavoritePath) => void jumpToFavorite(favorite),
   NameDialog,
   nameDialog,
@@ -765,6 +793,8 @@ return {
   removeFavoritePath,
   reorderFavoritePaths,
   rootNode,
+  ShortcutHelp,
+  platform,
   submitArchiveDialog,
   submitNameDialog: (value: string) => closeNameDialog(value),
   SplitNodeView

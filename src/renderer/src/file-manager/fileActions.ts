@@ -183,3 +183,31 @@ export const copySelectionToSecondary = async (
     sourceTab.errorMessage = error instanceof Error ? error.message : '无法复制对象。'
   }
 }
+
+export const moveSelectionToSecondary = async (
+  sourceTab: FileTabState,
+  targetTab: FileTabState | null,
+  loadDirectory: LoadDirectory
+): Promise<void> => {
+  const selectedPaths = getSelectedPaths(sourceTab)
+
+  sourceTab.errorMessage = ''
+
+  if (!targetTab) {
+    sourceTab.errorMessage = '没有可用的次焦点窗格。'
+    return
+  }
+
+  if (selectedPaths.length === 0) {
+    sourceTab.errorMessage = '未选择对象。'
+    return
+  }
+
+  try {
+    const movedPaths = await window.electron.fileManager.movePathsToDirectory(selectedPaths, targetTab.currentPath)
+    await loadDirectory(sourceTab, sourceTab.currentPath, false)
+    await refreshAndSelect(targetTab, movedPaths, loadDirectory)
+  } catch (error) {
+    sourceTab.errorMessage = error instanceof Error ? error.message : '无法移动对象。'
+  }
+}

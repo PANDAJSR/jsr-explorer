@@ -12,6 +12,7 @@ type KeyboardActions = {
   goForward: () => void
   goUp: () => void
   cut: () => void
+  moveSelectedToSecondary: () => void
   newFolder: () => void
   moveFocus: (direction: MoveDirection) => void
   moveSelection: (direction: 'previous' | 'next', extendSelection: boolean) => void
@@ -20,6 +21,7 @@ type KeyboardActions = {
   previewSelected: () => void
   rename: () => void
   showFavoritesManager: () => void
+  showShortcutHelp: () => void
   splitPane: (direction: SplitDirection) => void
   jumpToFavorite: (index: number) => void
   trash: () => void
@@ -59,6 +61,12 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
       }
     }
 
+    if (event.altKey && !primaryModifier && event.code === 'KeyC' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.moveSelectedToSecondary()
+      return
+    }
+
     if (event.altKey && event.shiftKey && event.code === 'KeyF' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.showFavoritesManager()
@@ -84,6 +92,18 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
     if (event.shiftKey && event.code === 'KeyF' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.newFolder()
+      return
+    }
+
+    if (event.shiftKey && !event.altKey && !primaryModifier && event.code === 'KeyH' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.showShortcutHelp()
+      return
+    }
+
+    if (event.shiftKey && !event.altKey && !primaryModifier && event.code === 'KeyC' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.copySelectedToSecondary()
       return
     }
 
@@ -174,12 +194,5 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
       actions.closeTab()
       return
     }
-
-    if (event.shiftKey && event.key.toLowerCase() === 'c') {
-      event.preventDefault()
-      actions.copySelectedToSecondary()
-      return
-    }
-
   }
 }

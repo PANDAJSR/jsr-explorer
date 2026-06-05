@@ -14,14 +14,17 @@ const {
   favorites,
   focusedTab,
   isFavoritesManagerOpen,
+  isShortcutHelpOpen,
   jumpToFavorite,
   NameDialog,
   nameDialog,
+  platform,
   QuickPreview,
   quickPreview,
   removeFavoritePath,
   reorderFavoritePaths,
   rootNode,
+  ShortcutHelp,
   SplitNodeView,
   submitArchiveDialog,
   submitNameDialog
@@ -56,6 +59,7 @@ const {
       @cancel="cancelNameDialog"
       @submit="submitNameDialog"
     />
+    <ShortcutHelp v-if="isShortcutHelpOpen" :platform="platform" @close="isShortcutHelpOpen = false" />
     <QuickPreview v-if="quickPreview" :preview="quickPreview" @close="closeQuickPreview" />
   </main>
 </template>
