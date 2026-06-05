@@ -62,6 +62,7 @@ export type PathSegment = {
 }
 
 export type FileTabState = {
+  kind: 'file'
   id: string
   currentPath: string
   parentPath: string | null
@@ -80,13 +81,34 @@ export type FileTabState = {
   loadSequence: number
 }
 
-export type PaneState = {
+export type TerminalTabState = {
+  kind: 'terminal'
+  id: string
+  cwd: string
+  title: string
+  terminalId: string | null
+  exitMessage: string
+}
+
+export type FilePaneState = {
+  kind: 'files'
   id: string
   isClosing: boolean
   enterFrom: 'right' | 'bottom' | null
   tabs: FileTabState[]
   activeTabId: string
 }
+
+export type TerminalPaneState = {
+  kind: 'terminal'
+  id: string
+  isClosing: boolean
+  enterFrom: 'right' | 'bottom' | null
+  tabs: TerminalTabState[]
+  activeTabId: string
+}
+
+export type PaneState = FilePaneState | TerminalPaneState
 
 export type SplitNode =
   | {

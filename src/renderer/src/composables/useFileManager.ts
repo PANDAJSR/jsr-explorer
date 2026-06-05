@@ -6,6 +6,7 @@ import FilePane from '../components/FilePane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import QuickPreview from '../components/QuickPreview.vue'
 import ShortcutHelp from '../components/ShortcutHelp.vue'
+import TerminalPane from '../components/TerminalPane.vue'
 import {
   copySelectionToClipboard,
   copySelectionToSecondary,
@@ -25,7 +26,7 @@ import { createKeyboardHandler } from '../file-manager/keyboard'
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
-import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
+import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
 
@@ -92,21 +93,25 @@ const nameDialog = ref<{
 let stopColumnResize: (() => void) | null = null
 let stopSplitResize: (() => void) | null = null
 let stopDirectoryChanged: (() => void) | null = null
-const { cloneTabForPath, createPane } = createStateFactory()
+const { cloneTabForPath, createPane, createTerminalPane, createTerminalTab } = createStateFactory()
 const initialPane = createPane('')
 panes[initialPane.id] = initialPane
 focusedPaneId.value = initialPane.id
+const lastFocusedFilePath = ref('')
 const rootNode = ref<SplitNode>({
   type: 'pane',
   paneId: initialPane.id
 })
 const focusedPane = computed(() => panes[focusedPaneId.value] ?? null)
 const secondaryPane = computed(() => (secondaryPaneId.value ? panes[secondaryPaneId.value] ?? null : null))
-const getActiveTab = (pane: PaneState | null): FileTabState | null =>
-  pane ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
-const focusedTab = computed(() => getActiveTab(focusedPane.value))
-const secondaryTab = computed(() => getActiveTab(secondaryPane.value))
-const getOpenTabs = (): FileTabState[] => Object.values(panes).flatMap((pane) => pane.tabs)
+const getActiveFileTab = (pane: PaneState | null): FileTabState | null =>
+  pane?.kind === 'files' ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
+const getActiveTerminalTab = (pane: PaneState | null) =>
+  pane?.kind === 'terminal' ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
+const focusedTab = computed(() => getActiveFileTab(focusedPane.value))
+const secondaryTab = computed(() => getActiveFileTab(secondaryPane.value))
+const getOpenTabs = (): FileTabState[] =>
+  Object.values(panes).flatMap((pane) => (pane.kind === 'files' ? pane.tabs : []))
 const getOpenDirectoryPaths = (): string[] => [
   ...new Set(getOpenTabs().map((tab) => tab.currentPath).filter((path) => path.length > 0))
 ]
@@ -127,6 +132,10 @@ const focusPane = (paneId: string): void => {
   }
   secondaryPaneId.value = focusedPaneId.value || null
   focusedPaneId.value = paneId
+  const tab = getActiveFileTab(panes[paneId])
+  if (tab?.currentPath) {
+    lastFocusedFilePath.value = tab.currentPath
+  }
 }
 const hideContextMenu = (): void => {
   contextMenu.value = null
@@ -152,6 +161,10 @@ const closeNameDialog = (value: string | null): void => {
 }
 const switchTab = (pane: PaneState, tabId: string): void => {
   pane.activeTabId = pane.tabs.some((tab) => tab.id === tabId) ? tabId : pane.activeTabId
+  const tab = getActiveFileTab(pane)
+  if (tab?.currentPath) {
+    lastFocusedFilePath.value = tab.currentPath
+  }
 }
 const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
   for (const entry of directoryEntries) {
@@ -208,6 +221,9 @@ const loadDirectory = async (tab: FileTabState, directoryPath: string, pushHisto
       return
     }
     applyDirectoryPayload(tab, payload, { preserveSelection: false, pushHistory })
+    if (tab === focusedTab.value) {
+      lastFocusedFilePath.value = payload.path
+    }
   } catch (error) {
     if (sequence === tab.loadSequence) {
       tab.errorMessage = error instanceof Error ? error.message : '无法加载文件夹。'
@@ -421,27 +437,58 @@ const startSplitResize = (event: MouseEvent, node: Extract<SplitNode, { type: 's
   document.addEventListener('mousemove', handleMove)
   document.addEventListener('mouseup', handleUp)
 }
+const getTerminalCwd = (): string => lastFocusedFilePath.value || focusedTab.value?.currentPath || ''
 const createTabInFocusedPane = (): void => {
   const pane = focusedPane.value
-  const tab = focusedTab.value
-  if (!pane || !tab) {
+  if (!pane) {
     return
   }
-  const newTab = cloneTabForPath(tab)
+
+  if (pane.kind === 'terminal') {
+    const newTab = createTerminalTab(getTerminalCwd() || getActiveTerminalTab(pane)?.cwd || '')
+    pane.tabs.push(newTab)
+    pane.activeTabId = newTab.id
+    return
+  }
+
+  const tab = getActiveFileTab(pane)
+  if (tab) {
+    const newTab = cloneTabForPath(tab)
+    pane.tabs.push(newTab)
+    pane.activeTabId = newTab.id
+    lastFocusedFilePath.value = newTab.currentPath
+  }
+}
+const createTerminalTabInPane = (pane: TerminalPaneState): void => {
+  const newTab = createTerminalTab(getTerminalCwd() || getActiveTerminalTab(pane)?.cwd || '')
   pane.tabs.push(newTab)
   pane.activeTabId = newTab.id
 }
-const splitFocusedPane = (direction: SplitDirection): void => {
+const splitFocusedPane = (direction: SplitDirection, kind: 'files' | 'terminal' = 'files'): void => {
   const sourcePane = focusedPane.value
-  const sourceTab = focusedTab.value
-  if (!sourcePane || !sourceTab) {
+  if (!sourcePane) {
     return
   }
-  const newPane = createPane(sourceTab.currentPath)
-  const newTab = cloneTabForPath(sourceTab)
+
+  const sourceTab = focusedTab.value
+  const cwd = getTerminalCwd() || sourceTab?.currentPath
+
+  if (!cwd) {
+    return
+  }
+
+  const newPane =
+    kind === 'terminal'
+      ? createTerminalPane(cwd)
+      : createPane(sourceTab?.currentPath || lastFocusedFilePath.value || cwd)
+
+  if (kind === 'files' && sourceTab) {
+    const newTab = cloneTabForPath(sourceTab)
+    newPane.tabs = [newTab]
+    newPane.activeTabId = newTab.id
+  }
+
   newPane.enterFrom = direction === 'horizontal' ? 'right' : 'bottom'
-  newPane.tabs = [newTab]
-  newPane.activeTabId = newTab.id
   panes[newPane.id] = reactive(newPane) as PaneState
   rootNode.value = replacePaneNode(rootNode.value, sourcePane.id, {
     type: 'split',
@@ -756,8 +803,21 @@ const SplitNodeView = defineComponent({
       const node = props.node
       if (node.type === 'pane') {
         const pane = panes[node.paneId]
-        const tab = getActiveTab(pane)
-        if (!pane || !tab) {
+        if (!pane) {
+          return null
+        }
+        if (pane.kind === 'terminal') {
+          return h(TerminalPane, {
+            pane,
+            focusState: getPaneFocusState(pane.id),
+            onFocus: focusPane,
+            onSwitchTab: switchTab,
+            onCloseTab: closeTab,
+            onCreateTab: createTerminalTabInPane
+          })
+        }
+        const tab = getActiveFileTab(pane)
+        if (!tab) {
           return null
         }
         return h(FilePane, {
@@ -837,6 +897,7 @@ onMounted(async () => {
   const tab = focusedTab.value
   if (tab) {
     tab.currentPath = homeDirectory
+    lastFocusedFilePath.value = homeDirectory
     await loadDirectory(tab, homeDirectory, false)
   }
 })

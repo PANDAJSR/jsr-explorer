@@ -39,5 +39,26 @@ contextBridge.exposeInMainWorld('electron', {
     startNativeDrag: (sourcePaths: string[]) => ipcRenderer.send('file-manager:start-native-drag', sourcePaths),
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
     getPlatform: () => ipcRenderer.invoke('file-manager:get-platform')
+  },
+  terminal: {
+    create: (options: { id: string; cwd: string; cols: number; rows: number }) => ipcRenderer.invoke('terminal:create', options),
+    write: (terminalId: string, data: string) => ipcRenderer.send('terminal:write', terminalId, data),
+    resize: (terminalId: string, cols: number, rows: number) =>
+      ipcRenderer.send('terminal:resize', terminalId, cols, rows),
+    dispose: (terminalId: string) => ipcRenderer.send('terminal:dispose', terminalId),
+    onData: (handler: (terminalId: string, data: string) => void) => {
+      const listener = (_: IpcRendererEvent, terminalId: string, data: string): void => handler(terminalId, data)
+      ipcRenderer.on('terminal:data', listener)
+      return () => ipcRenderer.removeListener('terminal:data', listener)
+    },
+    onExit: (handler: (terminalId: string, exit: { exitCode: number | null; signal?: number }) => void) => {
+      const listener = (
+        _: IpcRendererEvent,
+        terminalId: string,
+        exit: { exitCode: number | null; signal?: number }
+      ): void => handler(terminalId, exit)
+      ipcRenderer.on('terminal:exit', listener)
+      return () => ipcRenderer.removeListener('terminal:exit', listener)
+    }
   }
 })

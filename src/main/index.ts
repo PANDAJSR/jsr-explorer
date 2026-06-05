@@ -1,11 +1,12 @@
 import { constants, watch, type FSWatcher } from 'node:fs'
-import { copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { inflateRawSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell, type WebContents } from 'electron'
+import * as pty from 'node-pty'
 
 type FileManagerEntry = {
   name: string
@@ -25,6 +26,19 @@ type DirectoryWatcherState = {
   sender: WebContents
   timers: Map<string, NodeJS.Timeout>
   watchers: Map<string, FSWatcher>
+}
+
+type TerminalSession = {
+  id: string
+  ownerWebContentsId: number
+  process: pty.IPty
+}
+
+type TerminalCreateOptions = {
+  id?: string
+  cwd: string
+  cols: number
+  rows: number
 }
 
 type ClipboardMode = 'copy' | 'cut'
@@ -76,6 +90,9 @@ let internalClipboard: {
 } | null = null
 
 const directoryWatcherStates = new Map<number, DirectoryWatcherState>()
+const terminalSessions = new Map<string, TerminalSession>()
+const terminalCleanupWebContentsIds = new Set<number>()
+let nextTerminalId = 1
 
 const closeDirectoryWatcherState = (webContentsId: number): void => {
   const state = directoryWatcherStates.get(webContentsId)
@@ -112,6 +129,92 @@ const getDirectoryWatcherState = (sender: WebContents): DirectoryWatcherState =>
   sender.once('destroyed', () => closeDirectoryWatcherState(sender.id))
 
   return state
+}
+
+const disposeTerminalSession = (terminalId: string): void => {
+  const session = terminalSessions.get(terminalId)
+
+  if (!session) {
+    return
+  }
+
+  terminalSessions.delete(terminalId)
+  session.process.kill()
+}
+
+const disposeTerminalSessionsForWebContents = (webContentsId: number): void => {
+  for (const terminalId of [...terminalSessions.values()]
+    .filter((session) => session.ownerWebContentsId === webContentsId)
+    .map((session) => session.id)) {
+    disposeTerminalSession(terminalId)
+  }
+
+  terminalCleanupWebContentsIds.delete(webContentsId)
+}
+
+const canAccessPath = async (targetPath: string): Promise<boolean> => {
+  try {
+    await access(targetPath, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const getTerminalShell = async (): Promise<{ command: string; args: string[]; shellName: string }> => {
+  if (process.platform === 'win32') {
+    const candidates = [
+      `${process.env['ProgramFiles'] ?? 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
+      `${process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\Git\\bin\\bash.exe`,
+      `${process.env.LOCALAPPDATA ?? ''}\\Programs\\Git\\bin\\bash.exe`
+    ]
+
+    for (const candidate of candidates.filter(Boolean)) {
+      if (await canAccessPath(candidate)) {
+        return {
+          command: candidate,
+          args: ['--login', '-i'],
+          shellName: 'Git Bash'
+        }
+      }
+    }
+
+    return {
+      command: process.env.ComSpec ?? 'powershell.exe',
+      args: [],
+      shellName: basename(process.env.ComSpec ?? 'powershell.exe')
+    }
+  }
+
+  if (await canAccessPath('/bin/zsh')) {
+    return {
+      command: '/bin/zsh',
+      args: ['-l'],
+      shellName: 'zsh'
+    }
+  }
+
+  const shell = process.env.SHELL || '/bin/bash'
+
+  return {
+    command: shell,
+    args: ['-l'],
+    shellName: basename(shell)
+  }
+}
+
+const resolveTerminalCwd = async (cwd: string): Promise<string> => {
+  try {
+    const cwdStats = await stat(cwd)
+
+    if (cwdStats.isDirectory()) {
+      return cwd
+    }
+  } catch {
+    // Fall through to the user's home directory.
+  }
+
+  return homedir()
 }
 
 const notifyDirectoryChanged = (state: DirectoryWatcherState, directoryPath: string): void => {
@@ -998,6 +1101,80 @@ const registerFileManagerHandlers = (): void => {
   ipcMain.handle('file-manager:get-platform', () => process.platform)
 }
 
+const registerTerminalHandlers = (): void => {
+  ipcMain.handle('terminal:create', async (event, options: TerminalCreateOptions) => {
+    const cwd = await resolveTerminalCwd(options.cwd)
+    const shellConfig = await getTerminalShell()
+    const terminalId = options.id && !terminalSessions.has(options.id) ? options.id : `terminal-${nextTerminalId++}`
+    const terminalProcess = pty.spawn(shellConfig.command, shellConfig.args, {
+      cols: Math.max(20, Math.trunc(options.cols) || 80),
+      rows: Math.max(5, Math.trunc(options.rows) || 24),
+      cwd,
+      env: {
+        ...process.env,
+        COLORTERM: 'truecolor',
+        TERM: 'xterm-256color'
+      },
+      name: 'xterm-256color'
+    })
+
+    terminalSessions.set(terminalId, {
+      id: terminalId,
+      ownerWebContentsId: event.sender.id,
+      process: terminalProcess
+    })
+
+    if (!terminalCleanupWebContentsIds.has(event.sender.id)) {
+      terminalCleanupWebContentsIds.add(event.sender.id)
+      event.sender.once('destroyed', () => disposeTerminalSessionsForWebContents(event.sender.id))
+    }
+
+    terminalProcess.onData((data) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('terminal:data', terminalId, data)
+      }
+    })
+
+    terminalProcess.onExit((exit) => {
+      terminalSessions.delete(terminalId)
+
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('terminal:exit', terminalId, exit)
+      }
+    })
+
+    return {
+      id: terminalId,
+      cwd,
+      shellName: shellConfig.shellName
+    }
+  })
+
+  ipcMain.on('terminal:write', (event, terminalId: string, data: string) => {
+    const session = terminalSessions.get(terminalId)
+
+    if (session?.ownerWebContentsId === event.sender.id) {
+      session.process.write(data)
+    }
+  })
+
+  ipcMain.on('terminal:resize', (event, terminalId: string, cols: number, rows: number) => {
+    const session = terminalSessions.get(terminalId)
+
+    if (session?.ownerWebContentsId === event.sender.id) {
+      session.process.resize(Math.max(20, Math.trunc(cols) || 80), Math.max(5, Math.trunc(rows) || 24))
+    }
+  })
+
+  ipcMain.on('terminal:dispose', (event, terminalId: string) => {
+    const session = terminalSessions.get(terminalId)
+
+    if (session?.ownerWebContentsId === event.sender.id) {
+      disposeTerminalSession(terminalId)
+    }
+  })
+}
+
 const registerPreviewProtocol = (): void => {
   protocol.handle(previewScheme, async (request) => {
     const targetPath = decodePreviewPath(request.url)
@@ -1050,6 +1227,7 @@ const createWindow = (): void => {
 app.whenReady().then(() => {
   registerPreviewProtocol()
   registerFileManagerHandlers()
+  registerTerminalHandlers()
   createWindow()
 
   app.on('activate', () => {

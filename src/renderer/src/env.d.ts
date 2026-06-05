@@ -91,5 +91,17 @@ interface Window {
       getPathForFile: (file: File) => string
       getPlatform: () => Promise<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>
     }
+    terminal: {
+      create: (options: { id: string; cwd: string; cols: number; rows: number }) => Promise<{
+        id: string
+        cwd: string
+        shellName: string
+      }>
+      write: (terminalId: string, data: string) => void
+      resize: (terminalId: string, cols: number, rows: number) => void
+      dispose: (terminalId: string) => void
+      onData: (handler: (terminalId: string, data: string) => void) => () => void
+      onExit: (handler: (terminalId: string, exit: { exitCode: number | null; signal?: number }) => void) => () => void
+    }
   }
 }

@@ -1,10 +1,11 @@
-import type { FileTabState, PaneState } from './types'
+import type { FilePaneState, FileTabState, TerminalPaneState, TerminalTabState } from './types'
 
 export const createStateFactory = () => {
   let nextPaneId = 1
   let nextTabId = 1
 
   const createTab = (directoryPath: string): FileTabState => ({
+    kind: 'file',
     id: `tab-${nextTabId++}`,
     currentPath: directoryPath,
     parentPath: null,
@@ -31,10 +32,33 @@ export const createStateFactory = () => {
     sortDirection: sourceTab.sortDirection
   })
 
-  const createPane = (directoryPath: string): PaneState => {
+  const createTerminalTab = (cwd: string): TerminalTabState => ({
+    kind: 'terminal',
+    id: `tab-${nextTabId++}`,
+    cwd,
+    title: 'Terminal',
+    terminalId: null,
+    exitMessage: ''
+  })
+
+  const createPane = (directoryPath: string): FilePaneState => {
     const tab = createTab(directoryPath)
 
     return {
+      kind: 'files',
+      id: `pane-${nextPaneId++}`,
+      isClosing: false,
+      enterFrom: null,
+      tabs: [tab],
+      activeTabId: tab.id
+    }
+  }
+
+  const createTerminalPane = (cwd: string): TerminalPaneState => {
+    const tab = createTerminalTab(cwd)
+
+    return {
+      kind: 'terminal',
       id: `pane-${nextPaneId++}`,
       isClosing: false,
       enterFrom: null,
@@ -46,6 +70,8 @@ export const createStateFactory = () => {
   return {
     cloneTabForPath,
     createPane,
-    createTab
+    createTab,
+    createTerminalPane,
+    createTerminalTab
   }
 }

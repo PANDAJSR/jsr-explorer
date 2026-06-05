@@ -1,0 +1,88 @@
+.terminal-pane {
+  background: #111820;
+}
+
+.terminal-pane.is-active,
+.terminal-pane.is-secondary {
+  background: #111820;
+}
+
+.terminal-pane .tab-strip {
+  background: #202a35;
+  border-bottom-color: #334252;
+}
+
+.terminal-pane.is-active .tab-strip,
+.terminal-pane.is-secondary .tab-strip {
+  background: #202a35;
+}
+
+.terminal-pane .tab-button {
+  color: #b5c2cf;
+  background: #2a3542;
+  border-color: #3c4b5c;
+}
+
+.terminal-pane .tab-button.active {
+  color: #edf4fb;
+  background: #111820;
+}
+
+.terminal-pane .tab-close:hover {
+  color: #ffffff;
+  background: #3e4e60;
+}
+
+.tab-add {
+  display: grid;
+  flex: 0 0 auto;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  padding: 0;
+  color: #b5c2cf;
+  background: #2a3542;
+  border: 1px solid #3c4b5c;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tab-add:hover {
+  color: #ffffff;
+  background: #334252;
+}
+
+.terminal-tabs {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #111820;
+}
+
+.terminal-instance {
+  width: 100%;
+  height: 100%;
+  padding: 8px 10px;
+  overflow: hidden;
+}
+
+.terminal-instance:focus {
+  outline: none;
+}
+
+.terminal-exit {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  padding: 4px 8px;
+  color: #d6e0ea;
+  background: rgb(17 24 32 / 84%);
+  border: 1px solid #435467;
+  border-radius: 5px;
+  font-size: 12px;
+  pointer-events: none;
+}

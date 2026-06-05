@@ -46,6 +46,8 @@ const shortcutGroups = computed(() => [
       { keys: [primaryModifier.value, '↑'], description: '进入上一级' },
       { keys: [primaryModifier.value, 'D'], description: '向右拆分窗格' },
       { keys: [primaryModifier.value, 'Shift', 'D'], description: '向下拆分窗格' },
+      { keys: [primaryModifier.value, 'S'], description: '向右拆分终端窗格' },
+      { keys: [primaryModifier.value, 'Shift', 'S'], description: '向下拆分终端窗格' },
       { keys: [optionModifier.value, '← / → / ↑ / ↓'], description: '移动主焦点到相邻窗格' },
       { keys: [primaryModifier.value, 'T'], description: '新建标签页' },
       { keys: [primaryModifier.value, 'W'], description: '关闭当前标签页或窗格' }

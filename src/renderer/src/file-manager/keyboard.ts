@@ -22,7 +22,7 @@ type KeyboardActions = {
   rename: () => void
   showFavoritesManager: () => void
   showShortcutHelp: () => void
-  splitPane: (direction: SplitDirection) => void
+  splitPane: (direction: SplitDirection, kind: 'files' | 'terminal') => void
   jumpToFavorite: (index: number) => void
   trash: () => void
 }
@@ -177,9 +177,15 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
       return
     }
 
+    if (event.key.toLowerCase() === 's') {
+      event.preventDefault()
+      actions.splitPane(event.shiftKey ? 'vertical' : 'horizontal', 'terminal')
+      return
+    }
+
     if (event.key.toLowerCase() === 'd') {
       event.preventDefault()
-      actions.splitPane(event.shiftKey ? 'vertical' : 'horizontal')
+      actions.splitPane(event.shiftKey ? 'vertical' : 'horizontal', 'files')
       return
     }
 
