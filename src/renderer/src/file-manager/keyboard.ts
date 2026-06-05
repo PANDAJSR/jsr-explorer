@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { MoveDirection, Platform, SplitDirection } from './types'
 
 type KeyboardActions = {
+  clearSelection: () => void
   copySelectedToSecondary: () => void
   createTab: () => void
   closeTab: () => void
@@ -88,6 +89,12 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
     if (event.shiftKey && event.key === 'Backspace' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.trash()
+      return
+    }
+
+    if (event.key === 'Escape' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.clearSelection()
       return
     }
 

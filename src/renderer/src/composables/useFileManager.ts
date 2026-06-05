@@ -209,6 +209,17 @@ const previewSelected = async (): Promise<void> => {
 const closeQuickPreview = (): void => {
   quickPreview.value = null
 }
+const clearSelection = (): void => {
+  const tab = focusedTab.value
+
+  if (!tab) {
+    return
+  }
+
+  tab.selectedPaths = []
+  tab.activePath = null
+  tab.selectionAnchorPath = null
+}
 const scrollActiveRowIntoView = (paneId: string): void => {
   window.requestAnimationFrame(() => {
     document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"] .file-row.active`)?.scrollIntoView({
@@ -483,6 +494,7 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
   }
 }
 const handleFileManagerKeydown = createKeyboardHandler(platform, {
+  clearSelection,
   closeTab: closeFocusedTab,
   copy: () => runOnFocusedTab(copySelectionToClipboard),
   copySelectedToSecondary: () => void copySelectedFileToSecondaryPane(),
