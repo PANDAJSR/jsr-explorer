@@ -23,7 +23,9 @@
   border-color: #3c4b5c;
 }
 
-.terminal-pane .tab-button.active {
+.terminal-pane .tab-button.active,
+.terminal-pane.is-active .tab-button.active,
+.terminal-pane.is-secondary .tab-button.active {
   color: #edf4fb;
   background: #111820;
 }

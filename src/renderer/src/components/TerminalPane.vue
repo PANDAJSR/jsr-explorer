@@ -21,6 +21,12 @@ const activeTab = computed(() => props.pane.tabs.find((tab) => tab.id === props.
 const getTabTitle = (tab: TerminalTabState): string => tab.title || getPathLabel(tab.cwd) || 'Terminal'
 
 const activatePane = async (): Promise<void> => {
+  if (props.focusState !== 'primary') {
+    emit('focus', props.pane.id)
+  }
+}
+
+const activateTerminal = async (): Promise<void> => {
   emit('focus', props.pane.id)
   await nextTick()
   document.querySelector<HTMLElement>(`[data-terminal-tab-id="${activeTab.value?.id}"]`)?.focus()
@@ -38,7 +44,7 @@ const activatePane = async (): Promise<void> => {
       'is-entering-from-bottom': pane.enterFrom === 'bottom'
     }"
     :data-pane-id="pane.id"
-    @mousedown="activatePane"
+    @mousedown.capture="activatePane"
   >
     <nav class="tab-strip" aria-label="终端标签页">
       <button
@@ -64,7 +70,7 @@ const activatePane = async (): Promise<void> => {
       <button class="tab-add" type="button" title="新建终端标签页" @click="emit('createTab', pane)">+</button>
     </nav>
 
-    <section class="terminal-tabs">
+    <section class="terminal-tabs" @mousedown.capture="activateTerminal">
       <TerminalTabView
         v-for="paneTab in pane.tabs"
         :key="paneTab.id"

@@ -33,7 +33,8 @@ const fit = (): void => {
 onMounted(async () => {
   terminal = new Terminal({
     cursorBlink: true,
-    fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+    fontFamily:
+      '"MesloLGS NF", "MesloLGS Nerd Font Mono", "Hack Nerd Font Mono", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
     fontSize: 13,
     theme: {
       background: '#111820',
