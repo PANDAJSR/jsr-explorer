@@ -32,6 +32,7 @@ interface Window {
       openPath: (targetPath: string) => Promise<OpenPathResult>
       getParentDirectory: (directoryPath: string) => Promise<string | null>
       getFileIcon: (targetPath: string) => Promise<string>
+      copyFileToDirectory: (sourcePath: string, destinationDirectory: string) => Promise<string>
       getPlatform: () => Promise<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>
     }
   }

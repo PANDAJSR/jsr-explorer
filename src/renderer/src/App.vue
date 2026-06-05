@@ -1,30 +1,47 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, type PropType } from 'vue'
+import FilePane from './components/FilePane.vue'
 
 type SortKey = 'name' | 'modifiedAt' | 'size'
 type SortDirection = 'asc' | 'desc'
 type ColumnKey = 'name' | 'modifiedAt' | 'size'
-type PathSegment = {
-  label: string
-  path: string
+type SplitDirection = 'horizontal' | 'vertical'
+type MoveDirection = 'left' | 'right' | 'up' | 'down'
+
+type PaneState = {
+  id: string
+  currentPath: string
+  parentPath: string | null
+  entries: FileManagerEntry[]
+  selectedPath: string | null
+  errorMessage: string
+  isLoading: boolean
+  backStack: string[]
+  forwardStack: string[]
+  sortKey: SortKey
+  sortDirection: SortDirection
+  isEditingPath: boolean
+  editablePath: string
+  loadSequence: number
 }
 
-const entries = ref<FileManagerEntry[]>([])
-const currentPath = ref('')
-const parentPath = ref<string | null>(null)
-const selectedPath = ref<string | null>(null)
-const errorMessage = ref('')
-const isLoading = ref(false)
+type SplitNode =
+  | {
+      type: 'pane'
+      paneId: string
+    }
+  | {
+      type: 'split'
+      direction: SplitDirection
+      children: [SplitNode, SplitNode]
+    }
+
+const panes = reactive<Record<string, PaneState>>({})
 const platform = ref<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>(
   'darwin'
 )
-const backStack = ref<string[]>([])
-const forwardStack = ref<string[]>([])
-const sortKey = ref<SortKey>('name')
-const sortDirection = ref<SortDirection>('asc')
-const isEditingPath = ref(false)
-const editablePath = ref('')
-const pathInput = ref<HTMLInputElement | null>(null)
+const focusedPaneId = ref('')
+const secondaryPaneId = ref<string | null>(null)
 const iconCache = reactive<Record<string, string>>({})
 const columns = reactive<Record<ColumnKey, number>>({
   name: 520,
@@ -32,147 +49,105 @@ const columns = reactive<Record<ColumnKey, number>>({
   size: 150
 })
 
-let loadSequence = 0
+let nextPaneId = 1
 let stopColumnResize: (() => void) | null = null
 
-const columnStyle = computed(() => ({
-  gridTemplateColumns: `${columns.name}px ${columns.modifiedAt}px ${columns.size}px`
-}))
-
-const canGoBack = computed(() => backStack.value.length > 0)
-const canGoForward = computed(() => forwardStack.value.length > 0)
-const canGoUp = computed(() => parentPath.value !== null)
-
-const pathSegments = computed<PathSegment[]>(() => {
-  if (!currentPath.value) {
-    return []
-  }
-
-  if (platform.value === 'win32') {
-    return getWindowsPathSegments(currentPath.value)
-  }
-
-  return getPosixPathSegments(currentPath.value)
+const createPane = (directoryPath: string): PaneState => ({
+  id: `pane-${nextPaneId++}`,
+  currentPath: directoryPath,
+  parentPath: null,
+  entries: [],
+  selectedPath: null,
+  errorMessage: '',
+  isLoading: false,
+  backStack: [],
+  forwardStack: [],
+  sortKey: 'name',
+  sortDirection: 'asc',
+  isEditingPath: false,
+  editablePath: '',
+  loadSequence: 0
 })
 
-const sortedEntries = computed(() => {
-  return [...entries.value].sort((left, right) => {
-    if (left.type !== right.type) {
-      return left.type === 'directory' ? -1 : 1
-    }
+const initialPane = createPane('')
+panes[initialPane.id] = initialPane
+focusedPaneId.value = initialPane.id
 
-    let result = 0
-
-    if (sortKey.value === 'name') {
-      result = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
-    }
-
-    if (sortKey.value === 'modifiedAt') {
-      result = left.modifiedAt - right.modifiedAt
-    }
-
-    if (sortKey.value === 'size') {
-      const leftSize = left.size ?? -1
-      const rightSize = right.size ?? -1
-      result = leftSize - rightSize
-    }
-
-    if (result === 0) {
-      result = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
-    }
-
-    return sortDirection.value === 'asc' ? result : -result
-  })
+const rootNode = ref<SplitNode>({
+  type: 'pane',
+  paneId: initialPane.id
 })
 
-const formatModifiedAt = (modifiedAt: number): string => {
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(modifiedAt))
+const focusedPane = computed(() => panes[focusedPaneId.value] ?? null)
+const secondaryPane = computed(() => (secondaryPaneId.value ? panes[secondaryPaneId.value] ?? null : null))
+
+const getPaneFocusState = (paneId: string): 'primary' | 'secondary' | 'none' => {
+  if (paneId === focusedPaneId.value) {
+    return 'primary'
+  }
+
+  if (paneId === secondaryPaneId.value) {
+    return 'secondary'
+  }
+
+  return 'none'
 }
 
-const formatSize = (size: number | null): string => {
-  if (size === null) {
-    return '--'
+const focusPane = (paneId: string): void => {
+  if (!panes[paneId] || paneId === focusedPaneId.value) {
+    return
   }
 
-  if (size < 1024) {
-    return `${size} B`
-  }
-
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = size / 1024
-  let unitIndex = 0
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-
-  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`
+  secondaryPaneId.value = focusedPaneId.value || null
+  focusedPaneId.value = paneId
 }
 
-const getPosixPathSegments = (targetPath: string): PathSegment[] => {
-  if (targetPath === '/') {
-    return [{ label: '/', path: '/' }]
+const findFirstPaneId = (node: SplitNode): string => {
+  if (node.type === 'pane') {
+    return node.paneId
   }
 
-  const segments: PathSegment[] = []
-  const names = targetPath.split('/').filter(Boolean)
-  let path = targetPath.startsWith('/') ? '/' : ''
-
-  if (targetPath.startsWith('/')) {
-    segments.push({ label: '/', path: '/' })
-  }
-
-  for (const name of names) {
-    path = path === '/' || path === '' ? `${path}${name}` : `${path}/${name}`
-    segments.push({ label: name, path })
-  }
-
-  return segments
+  return findFirstPaneId(node.children[0])
 }
 
-const getWindowsPathSegments = (targetPath: string): PathSegment[] => {
-  const normalizedPath = targetPath.replaceAll('/', '\\')
-  const driveMatch = normalizedPath.match(/^[A-Za-z]:\\?/)
-
-  if (driveMatch) {
-    const driveRoot = `${driveMatch[0].slice(0, 2)}\\`
-    const segments: PathSegment[] = [{ label: driveRoot, path: driveRoot }]
-    const names = normalizedPath.slice(driveMatch[0].length).split('\\').filter(Boolean)
-    let path = driveRoot
-
-    for (const name of names) {
-      path = path.endsWith('\\') ? `${path}${name}` : `${path}\\${name}`
-      segments.push({ label: name, path })
-    }
-
-    return segments
+const replacePaneNode = (node: SplitNode, paneId: string, replacement: SplitNode): SplitNode => {
+  if (node.type === 'pane') {
+    return node.paneId === paneId ? replacement : node
   }
 
-  if (normalizedPath.startsWith('\\\\')) {
-    const names = normalizedPath.split('\\').filter(Boolean)
-    const shareRoot = names.length >= 2 ? `\\\\${names[0]}\\${names[1]}\\` : normalizedPath
-    const segments: PathSegment[] = [{ label: shareRoot, path: shareRoot }]
-    let path = shareRoot
+  return {
+    ...node,
+    children: [
+      replacePaneNode(node.children[0], paneId, replacement),
+      replacePaneNode(node.children[1], paneId, replacement)
+    ]
+  }
+}
 
-    for (const name of names.slice(2)) {
-      path = path.endsWith('\\') ? `${path}${name}` : `${path}\\${name}`
-      segments.push({ label: name, path })
-    }
-
-    return segments
+const removePaneNode = (node: SplitNode, paneId: string): SplitNode | null => {
+  if (node.type === 'pane') {
+    return node.paneId === paneId ? null : node
   }
 
-  return normalizedPath.split('\\').filter(Boolean).map((name, index, names) => ({
-    label: name,
-    path: names.slice(0, index + 1).join('\\')
-  }))
+  const first = removePaneNode(node.children[0], paneId)
+  const second = removePaneNode(node.children[1], paneId)
+
+  if (!first && !second) {
+    return null
+  }
+
+  if (!first) {
+    return second
+  }
+
+  if (!second) {
+    return first
+  }
+
+  return {
+    ...node,
+    children: [first, second]
+  }
 }
 
 const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
@@ -192,128 +167,98 @@ const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
   }
 }
 
-const loadDirectory = async (directoryPath: string, pushHistory = true): Promise<void> => {
-  const sequence = (loadSequence += 1)
-  errorMessage.value = ''
-  isLoading.value = true
+const loadDirectory = async (pane: PaneState, directoryPath: string, pushHistory = true): Promise<void> => {
+  const sequence = (pane.loadSequence += 1)
+  pane.errorMessage = ''
+  pane.isLoading = true
 
   try {
     const payload = await window.electron.fileManager.listDirectory(directoryPath)
 
-    if (sequence !== loadSequence) {
+    if (sequence !== pane.loadSequence) {
       return
     }
 
-    if (pushHistory && currentPath.value && currentPath.value !== payload.path) {
-      backStack.value.push(currentPath.value)
-      forwardStack.value = []
+    if (pushHistory && pane.currentPath && pane.currentPath !== payload.path) {
+      pane.backStack.push(pane.currentPath)
+      pane.forwardStack = []
     }
 
-    currentPath.value = payload.path
-    parentPath.value = payload.parentPath
-    entries.value = payload.entries
-    selectedPath.value = null
+    pane.currentPath = payload.path
+    pane.parentPath = payload.parentPath
+    pane.entries = payload.entries
+    pane.selectedPath = null
     loadFileIcons(payload.entries)
   } catch (error) {
-    if (sequence === loadSequence) {
-      errorMessage.value = error instanceof Error ? error.message : 'Unable to load directory.'
+    if (sequence === pane.loadSequence) {
+      pane.errorMessage = error instanceof Error ? error.message : 'Unable to load directory.'
     }
   } finally {
-    if (sequence === loadSequence) {
-      isLoading.value = false
+    if (sequence === pane.loadSequence) {
+      pane.isLoading = false
     }
   }
 }
 
-const openEntry = async (entry: FileManagerEntry): Promise<void> => {
-  errorMessage.value = ''
+const openEntry = async (pane: PaneState, entry: FileManagerEntry): Promise<void> => {
+  pane.errorMessage = ''
 
   try {
     const result = await window.electron.fileManager.openPath(entry.path)
 
     if (result.action === 'enter-directory') {
-      await loadDirectory(result.path)
+      await loadDirectory(pane, result.path)
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to open item.'
+    pane.errorMessage = error instanceof Error ? error.message : 'Unable to open item.'
   }
 }
 
 const openSelected = async (): Promise<void> => {
-  const entry = entries.value.find((item) => item.path === selectedPath.value)
+  const pane = focusedPane.value
+  const entry = pane?.entries.find((item) => item.path === pane.selectedPath)
 
-  if (entry) {
-    await openEntry(entry)
+  if (pane && entry) {
+    await openEntry(pane, entry)
   }
 }
 
-const goBack = async (): Promise<void> => {
-  const targetPath = backStack.value.pop()
+const goBack = async (pane = focusedPane.value): Promise<void> => {
+  const targetPath = pane?.backStack.pop()
 
-  if (!targetPath || !currentPath.value) {
+  if (!pane || !targetPath || !pane.currentPath) {
     return
   }
 
-  forwardStack.value.push(currentPath.value)
-  await loadDirectory(targetPath, false)
+  pane.forwardStack.push(pane.currentPath)
+  await loadDirectory(pane, targetPath, false)
 }
 
-const goForward = async (): Promise<void> => {
-  const targetPath = forwardStack.value.pop()
+const goForward = async (pane = focusedPane.value): Promise<void> => {
+  const targetPath = pane?.forwardStack.pop()
 
-  if (!targetPath || !currentPath.value) {
+  if (!pane || !targetPath || !pane.currentPath) {
     return
   }
 
-  backStack.value.push(currentPath.value)
-  await loadDirectory(targetPath, false)
+  pane.backStack.push(pane.currentPath)
+  await loadDirectory(pane, targetPath, false)
 }
 
-const goUp = async (): Promise<void> => {
-  if (parentPath.value) {
-    await loadDirectory(parentPath.value)
+const goUp = async (pane = focusedPane.value): Promise<void> => {
+  if (pane?.parentPath) {
+    await loadDirectory(pane, pane.parentPath)
   }
 }
 
-const startPathEditing = async (): Promise<void> => {
-  editablePath.value = currentPath.value
-  isEditingPath.value = true
-  await nextTick()
-  pathInput.value?.focus()
-  pathInput.value?.select()
-}
-
-const stopPathEditing = (): void => {
-  isEditingPath.value = false
-}
-
-const submitPathEditing = async (): Promise<void> => {
-  const targetPath = editablePath.value.trim()
-  isEditingPath.value = false
-
-  if (!targetPath || targetPath === currentPath.value) {
+const setSort = (pane: PaneState, key: SortKey): void => {
+  if (pane.sortKey === key) {
+    pane.sortDirection = pane.sortDirection === 'asc' ? 'desc' : 'asc'
     return
   }
 
-  await loadDirectory(targetPath)
-}
-
-const setSort = (key: SortKey): void => {
-  if (sortKey.value === key) {
-    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
-    return
-  }
-
-  sortKey.value = key
-  sortDirection.value = 'asc'
-}
-
-const sortIndicator = (key: SortKey): string => {
-  if (sortKey.value !== key) {
-    return ''
-  }
-
-  return sortDirection.value === 'asc' ? '▲' : '▼'
+  pane.sortKey = key
+  pane.sortDirection = 'asc'
 }
 
 const startColumnResize = (event: MouseEvent, column: ColumnKey): void => {
@@ -340,7 +285,152 @@ const startColumnResize = (event: MouseEvent, column: ColumnKey): void => {
   document.addEventListener('mouseup', handleUp)
 }
 
+const splitFocusedPane = (direction: SplitDirection): void => {
+  const sourcePane = focusedPane.value
+
+  if (!sourcePane) {
+    return
+  }
+
+  const newPane = createPane(sourcePane.currentPath)
+  newPane.parentPath = sourcePane.parentPath
+  newPane.entries = [...sourcePane.entries]
+  panes[newPane.id] = reactive(newPane) as PaneState
+
+  rootNode.value = replacePaneNode(rootNode.value, sourcePane.id, {
+    type: 'split',
+    direction,
+    children: [
+      {
+        type: 'pane',
+        paneId: sourcePane.id
+      },
+      {
+        type: 'pane',
+        paneId: newPane.id
+      }
+    ]
+  })
+
+  focusPane(newPane.id)
+}
+
+const closeFocusedPane = (): void => {
+  const paneId = focusedPaneId.value
+  const paneIds = Object.keys(panes)
+
+  if (paneIds.length <= 1 || !paneId) {
+    return
+  }
+
+  const nextRootNode = removePaneNode(rootNode.value, paneId)
+
+  if (!nextRootNode) {
+    return
+  }
+
+  rootNode.value = nextRootNode
+  delete panes[paneId]
+
+  const preferredPaneId = secondaryPaneId.value && panes[secondaryPaneId.value] ? secondaryPaneId.value : null
+  focusedPaneId.value = preferredPaneId ?? findFirstPaneId(rootNode.value)
+  secondaryPaneId.value = null
+}
+
+const moveFocus = (direction: MoveDirection): void => {
+  const focusedElement = document.querySelector<HTMLElement>(`[data-pane-id="${focusedPaneId.value}"]`)
+
+  if (!focusedElement) {
+    return
+  }
+
+  const focusedRect = focusedElement.getBoundingClientRect()
+  const focusedCenterX = focusedRect.left + focusedRect.width / 2
+  const focusedCenterY = focusedRect.top + focusedRect.height / 2
+  const candidates = [...document.querySelectorAll<HTMLElement>('[data-pane-id]')]
+    .filter((element) => element.dataset.paneId && element.dataset.paneId !== focusedPaneId.value)
+    .map((element) => {
+      const rect = element.getBoundingClientRect()
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      const horizontalDistance = centerX - focusedCenterX
+      const verticalDistance = centerY - focusedCenterY
+      const isCandidate =
+        (direction === 'left' && horizontalDistance < 0) ||
+        (direction === 'right' && horizontalDistance > 0) ||
+        (direction === 'up' && verticalDistance < 0) ||
+        (direction === 'down' && verticalDistance > 0)
+
+      return {
+        paneId: element.dataset.paneId ?? '',
+        isCandidate,
+        primaryDistance: direction === 'left' || direction === 'right' ? Math.abs(horizontalDistance) : Math.abs(verticalDistance),
+        crossDistance: direction === 'left' || direction === 'right' ? Math.abs(verticalDistance) : Math.abs(horizontalDistance)
+      }
+    })
+    .filter((candidate) => candidate.isCandidate)
+    .sort((left, right) => left.primaryDistance + left.crossDistance * 0.4 - (right.primaryDistance + right.crossDistance * 0.4))
+
+  const nextPaneId = candidates[0]?.paneId
+
+  if (nextPaneId) {
+    focusPane(nextPaneId)
+  }
+}
+
+const copySelectedFileToSecondaryPane = async (): Promise<void> => {
+  const sourcePane = focusedPane.value
+  const targetPane = secondaryPane.value
+
+  if (!sourcePane) {
+    return
+  }
+
+  sourcePane.errorMessage = ''
+
+  if (!targetPane) {
+    sourcePane.errorMessage = 'No secondary pane available.'
+    return
+  }
+
+  const selectedEntry = sourcePane.entries.find((entry) => entry.path === sourcePane.selectedPath)
+
+  if (!selectedEntry) {
+    sourcePane.errorMessage = 'No file selected.'
+    return
+  }
+
+  if (selectedEntry.type !== 'file') {
+    sourcePane.errorMessage = 'Only files can be copied.'
+    return
+  }
+
+  try {
+    const copiedPath = await window.electron.fileManager.copyFileToDirectory(selectedEntry.path, targetPane.currentPath)
+    await loadDirectory(targetPane, targetPane.currentPath, false)
+    targetPane.selectedPath = copiedPath
+  } catch (error) {
+    sourcePane.errorMessage = error instanceof Error ? error.message : 'Unable to copy file.'
+  }
+}
+
 const handleKeydown = (event: KeyboardEvent): void => {
+  if (event.altKey) {
+    const directionByKey: Partial<Record<string, MoveDirection>> = {
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      ArrowUp: 'up',
+      ArrowDown: 'down'
+    }
+    const direction = directionByKey[event.key]
+
+    if (direction) {
+      event.preventDefault()
+      moveFocus(direction)
+      return
+    }
+  }
+
   const primaryModifier = platform.value === 'darwin' ? event.metaKey : event.ctrlKey
 
   if (!primaryModifier) {
@@ -350,29 +440,102 @@ const handleKeydown = (event: KeyboardEvent): void => {
   if (event.key === '[') {
     event.preventDefault()
     void goBack()
+    return
   }
 
   if (event.key === ']') {
     event.preventDefault()
     void goForward()
+    return
   }
 
   if (event.key === 'ArrowUp') {
     event.preventDefault()
     void goUp()
+    return
   }
 
   if (event.key.toLowerCase() === 'o') {
     event.preventDefault()
     void openSelected()
+    return
+  }
+
+  if (event.key.toLowerCase() === 'd') {
+    event.preventDefault()
+    splitFocusedPane(event.shiftKey ? 'vertical' : 'horizontal')
+    return
+  }
+
+  if (event.key.toLowerCase() === 'w') {
+    event.preventDefault()
+    closeFocusedPane()
+    return
+  }
+
+  if (event.shiftKey && event.key.toLowerCase() === 'c') {
+    event.preventDefault()
+    void copySelectedFileToSecondaryPane()
   }
 }
+
+const SplitNodeView = defineComponent({
+  name: 'SplitNodeView',
+  props: {
+    node: {
+      type: Object as PropType<SplitNode>,
+      required: true
+    }
+  },
+  setup(props) {
+    return () => {
+      const node = props.node
+
+      if (node.type === 'pane') {
+        const pane = panes[node.paneId]
+
+        if (!pane) {
+          return null
+        }
+
+        return h(FilePane, {
+          pane,
+          platform: platform.value,
+          focusState: getPaneFocusState(pane.id),
+          columns,
+          iconCache,
+          onFocus: focusPane,
+          onNavigate: (targetPane: PaneState, path: string) => loadDirectory(targetPane, path),
+          onOpenEntry: openEntry,
+          onGoBack: goBack,
+          onGoForward: goForward,
+          onGoUp: goUp,
+          onSetSort: setSort,
+          onResizeColumn: startColumnResize
+        })
+      }
+
+      return h(
+        'div',
+        {
+          class: ['split-node', `split-node-${node.direction}`]
+        },
+        [h(SplitNodeView, { node: node.children[0] }), h(SplitNodeView, { node: node.children[1] })]
+      )
+    }
+  }
+})
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   platform.value = await window.electron.fileManager.getPlatform()
   const homeDirectory = await window.electron.fileManager.getHomeDirectory()
-  await loadDirectory(homeDirectory, false)
+  const pane = focusedPane.value
+
+  if (pane) {
+    pane.currentPath = homeDirectory
+    await loadDirectory(pane, homeDirectory, false)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -383,112 +546,6 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="file-manager">
-    <header class="toolbar">
-      <div class="navigation">
-        <button class="icon-button" type="button" :disabled="!canGoBack" title="Back" @click="goBack">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
-        <button class="icon-button" type="button" :disabled="!canGoForward" title="Forward" @click="goForward">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </button>
-        <button class="icon-button" type="button" :disabled="!canGoUp" title="Up" @click="goUp">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 19V5" />
-            <path d="M5 12l7-7 7 7" />
-          </svg>
-        </button>
-      </div>
-
-      <div class="path-bar" :title="currentPath">
-        <input
-          v-if="isEditingPath"
-          ref="pathInput"
-          v-model="editablePath"
-          class="path-input"
-          type="text"
-          spellcheck="false"
-          @keydown.enter.prevent="submitPathEditing"
-          @keydown.escape.prevent="stopPathEditing"
-          @blur="stopPathEditing"
-        />
-        <div v-else class="path-breadcrumbs">
-          <template v-for="(segment, index) in pathSegments" :key="segment.path">
-            <button class="path-segment" type="button" @click="loadDirectory(segment.path)">
-              {{ segment.label }}
-            </button>
-            <span v-if="index < pathSegments.length - 1" class="path-separator">/</span>
-          </template>
-          <button
-            class="path-empty-space"
-            type="button"
-            aria-label="Edit path"
-            title="Edit path"
-            @click="startPathEditing"
-          ></button>
-        </div>
-      </div>
-    </header>
-
-    <section class="status-line" aria-live="polite">
-      <span v-if="isLoading">Loading...</span>
-      <span v-else-if="errorMessage" class="error-text">{{ errorMessage }}</span>
-      <span v-else>{{ sortedEntries.length }} items</span>
-    </section>
-
-    <section class="file-list" aria-label="Files">
-      <div class="file-header file-grid" :style="columnStyle">
-        <button class="header-cell name-header" type="button" @click="setSort('name')">
-          <span>Name</span>
-          <span class="sort-mark">{{ sortIndicator('name') }}</span>
-          <span class="column-resizer" @mousedown="startColumnResize($event, 'name')"></span>
-        </button>
-        <button class="header-cell" type="button" @click="setSort('modifiedAt')">
-          <span>Modified</span>
-          <span class="sort-mark">{{ sortIndicator('modifiedAt') }}</span>
-          <span class="column-resizer" @mousedown="startColumnResize($event, 'modifiedAt')"></span>
-        </button>
-        <button class="header-cell size-header" type="button" @click="setSort('size')">
-          <span>Size</span>
-          <span class="sort-mark">{{ sortIndicator('size') }}</span>
-          <span class="column-resizer" @mousedown="startColumnResize($event, 'size')"></span>
-        </button>
-      </div>
-
-      <div class="file-rows">
-        <button
-          v-for="entry in sortedEntries"
-          :key="entry.path"
-          class="file-row file-grid"
-          :class="{ selected: selectedPath === entry.path }"
-          type="button"
-          :style="columnStyle"
-          @click="selectedPath = entry.path"
-          @dblclick="openEntry(entry)"
-        >
-          <span class="file-cell name-cell">
-            <span v-if="entry.type === 'directory'" class="folder-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path class="folder-back" d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4.2l2 2H18a3 3 0 0 1 3 3v.5H3z" />
-                <path class="folder-front" d="M3 9.5h18l-1.5 8A3 3 0 0 1 16.6 20H5.4a3 3 0 0 1-2.9-2.5z" />
-              </svg>
-            </span>
-            <img v-else-if="iconCache[entry.path]" class="system-icon" :src="iconCache[entry.path]" alt="" />
-            <span v-else class="generic-file-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M7 3h7l4 4v14H7z" />
-                <path d="M14 3v5h4" />
-              </svg>
-            </span>
-            <span class="file-name" :title="entry.name">{{ entry.name }}</span>
-          </span>
-          <span class="file-cell muted">{{ formatModifiedAt(entry.modifiedAt) }}</span>
-          <span class="file-cell size-cell muted">{{ formatSize(entry.size) }}</span>
-        </button>
-      </div>
-    </section>
+    <SplitNodeView :node="rootNode" />
   </main>
 </template>

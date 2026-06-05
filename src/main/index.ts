@@ -1,5 +1,6 @@
-import { readdir, stat } from 'node:fs/promises'
-import { dirname, join, parse } from 'node:path'
+import { constants } from 'node:fs'
+import { copyFile, readdir, stat } from 'node:fs/promises'
+import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 
@@ -24,6 +25,25 @@ const getParentPath = (directoryPath: string): string | null => {
   }
 
   return dirname(directoryPath)
+}
+
+const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
+  const originalName = basename(sourcePath)
+  const extension = extname(originalName)
+  const stem = extension ? originalName.slice(0, -extension.length) : originalName
+
+  for (let index = 0; index < 1000; index += 1) {
+    const copyName = index === 0 ? originalName : `${stem} copy${index === 1 ? '' : ` ${index}`}${extension}`
+    const copyPath = join(destinationDirectory, copyName)
+
+    try {
+      await stat(copyPath)
+    } catch {
+      return copyPath
+    }
+  }
+
+  throw new Error(`Could not find an available name for ${originalName}`)
 }
 
 const registerFileManagerHandlers = (): void => {
@@ -89,6 +109,24 @@ const registerFileManagerHandlers = (): void => {
   ipcMain.handle('file-manager:get-file-icon', async (_, targetPath: string) => {
     const icon = await app.getFileIcon(targetPath, { size: 'normal' })
     return icon.toDataURL()
+  })
+
+  ipcMain.handle('file-manager:copy-file-to-directory', async (_, sourcePath: string, destinationDirectory: string) => {
+    const sourceStats = await stat(sourcePath)
+    const destinationStats = await stat(destinationDirectory)
+
+    if (!sourceStats.isFile()) {
+      throw new Error('Only files can be copied.')
+    }
+
+    if (!destinationStats.isDirectory()) {
+      throw new Error(`${destinationDirectory} is not a directory`)
+    }
+
+    const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
+    await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+
+    return destinationPath
   })
 
   ipcMain.handle('file-manager:get-platform', () => process.platform)

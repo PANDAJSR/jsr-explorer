@@ -23,11 +23,51 @@ button {
 
 .file-manager {
   display: flex;
-  flex-direction: column;
   width: 100%;
   height: 100%;
   min-width: 760px;
+  min-height: 520px;
+  padding: 4px;
   background: #fbfcfd;
+}
+
+.split-node {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  gap: 4px;
+}
+
+.split-node-horizontal {
+  flex-direction: row;
+}
+
+.split-node-vertical {
+  flex-direction: column;
+}
+
+.file-pane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 280px;
+  min-height: 220px;
+  overflow: hidden;
+  background: #fbfcfd;
+  border: 1px solid #d6dde5;
+  border-radius: 7px;
+}
+
+.file-pane.is-secondary {
+  background: #f2f7ff;
+  border-color: #adc9ee;
+}
+
+.file-pane.is-active {
+  background: #eaf4ff;
+  border-color: #5d9cec;
+  box-shadow: inset 0 0 0 1px #5d9cec;
 }
 
 .toolbar {
@@ -38,6 +78,16 @@ button {
   padding: 10px 14px;
   border-bottom: 1px solid #d7dde4;
   background: #eef2f5;
+}
+
+.file-pane.is-secondary .toolbar,
+.file-pane.is-secondary .status-line {
+  background: #edf5ff;
+}
+
+.file-pane.is-active .toolbar,
+.file-pane.is-active .status-line {
+  background: #e3f0ff;
 }
 
 .navigation {
@@ -171,6 +221,14 @@ button {
   min-height: 0;
   overflow: auto;
   background: #ffffff;
+}
+
+.file-pane.is-secondary .file-list {
+  background: #fbfdff;
+}
+
+.file-pane.is-active .file-list {
+  background: #f8fbff;
 }
 
 .file-grid {
