@@ -2,7 +2,7 @@ import type { FileTabState } from './types'
 
 export const sortEntriesForTab = (tab: FileTabState): FileManagerEntry[] => {
   return [...tab.entries].sort((left, right) => {
-    if (left.type !== right.type) {
+    if (tab.sortKey === 'size' && left.type !== right.type) {
       return left.type === 'directory' ? -1 : 1
     }
 
