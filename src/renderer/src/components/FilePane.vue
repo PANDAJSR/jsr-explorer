@@ -26,6 +26,7 @@ const emit = defineEmits<{
   setSort: [tab: FileTabState, key: SortKey]
   resizeColumn: [event: MouseEvent, column: ColumnKey]
   dropPaths: [tab: FileTabState, paths: string[]]
+  showContextMenu: [tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean]
 }>()
 
 const pathInput = ref<HTMLInputElement | null>(null)
@@ -104,6 +105,14 @@ const selectEntry = (event: MouseEvent, entry: FileManagerEntry): void => {
   }
 
   selectSingleEntry(entry)
+}
+
+const selectEntryForContextMenu = (event: MouseEvent, entry: FileManagerEntry): void => {
+  if (!props.tab.selectedPaths.includes(entry.path)) {
+    selectSingleEntry(entry)
+  }
+
+  emit('showContextMenu', props.tab, event, true)
 }
 
 const ensureDraggedEntryIsSelected = (entry: FileManagerEntry): void => {
@@ -218,7 +227,7 @@ const submitPathEditing = (): void => {
     @dragover="handlePaneDragOver"
     @drop="handlePaneDrop"
   >
-    <nav class="tab-strip" aria-label="Tabs">
+    <nav class="tab-strip" aria-label="标签页">
       <button
         v-for="paneTab in pane.tabs"
         :key="paneTab.id"
@@ -233,7 +242,7 @@ const submitPathEditing = (): void => {
           class="tab-close"
           role="button"
           tabindex="-1"
-          title="Close tab"
+          title="关闭标签页"
           @click.stop="emit('closeTab', pane, paneTab.id)"
         >
           ×
@@ -243,7 +252,7 @@ const submitPathEditing = (): void => {
 
     <header class="toolbar">
       <div class="navigation">
-        <button class="icon-button" type="button" :disabled="!canGoBack" title="Back" @click="emit('goBack', tab)">
+        <button class="icon-button" type="button" :disabled="!canGoBack" title="后退" @click="emit('goBack', tab)">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 18l-6-6 6-6" />
           </svg>
@@ -252,14 +261,14 @@ const submitPathEditing = (): void => {
           class="icon-button"
           type="button"
           :disabled="!canGoForward"
-          title="Forward"
+          title="前进"
           @click="emit('goForward', tab)"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M9 18l6-6-6-6" />
           </svg>
         </button>
-        <button class="icon-button" type="button" :disabled="!canGoUp" title="Up" @click="emit('goUp', tab)">
+        <button class="icon-button" type="button" :disabled="!canGoUp" title="上一级" @click="emit('goUp', tab)">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 19V5" />
             <path d="M5 12l7-7 7 7" />
@@ -289,8 +298,8 @@ const submitPathEditing = (): void => {
           <button
             class="path-empty-space"
             type="button"
-            aria-label="Edit path"
-            title="Edit path"
+            aria-label="编辑路径"
+            title="编辑路径"
             @click="startPathEditing"
           ></button>
         </div>
@@ -298,25 +307,25 @@ const submitPathEditing = (): void => {
     </header>
 
     <section class="status-line" aria-live="polite">
-      <span v-if="tab.isLoading">Loading...</span>
+      <span v-if="tab.isLoading">加载中...</span>
       <span v-else-if="tab.errorMessage" class="error-text">{{ tab.errorMessage }}</span>
-      <span v-else>{{ sortedEntries.length }} items</span>
+      <span v-else>{{ sortedEntries.length }} 个对象</span>
     </section>
 
-    <section class="file-list" aria-label="Files">
+    <section class="file-list" aria-label="文件" @contextmenu="emit('showContextMenu', tab, $event, false)">
       <div class="file-header file-grid" :style="columnStyle">
         <button class="header-cell name-header" type="button" @click="emit('setSort', tab, 'name')">
-          <span>Name</span>
+          <span>名称</span>
           <span class="sort-mark">{{ sortIndicator('name') }}</span>
           <span class="column-resizer" @mousedown="emit('resizeColumn', $event, 'name')"></span>
         </button>
         <button class="header-cell" type="button" @click="emit('setSort', tab, 'modifiedAt')">
-          <span>Modified</span>
+          <span>修改日期</span>
           <span class="sort-mark">{{ sortIndicator('modifiedAt') }}</span>
           <span class="column-resizer" @mousedown="emit('resizeColumn', $event, 'modifiedAt')"></span>
         </button>
         <button class="header-cell size-header" type="button" @click="emit('setSort', tab, 'size')">
-          <span>Size</span>
+          <span>大小</span>
           <span class="sort-mark">{{ sortIndicator('size') }}</span>
           <span class="column-resizer" @mousedown="emit('resizeColumn', $event, 'size')"></span>
         </button>
@@ -332,6 +341,7 @@ const submitPathEditing = (): void => {
           draggable="true"
           :style="columnStyle"
           @click="selectEntry($event, entry)"
+          @contextmenu.stop.prevent="selectEntryForContextMenu($event, entry)"
           @dblclick="emit('openEntry', tab, entry)"
           @dragstart="startEntryDrag($event, entry)"
         >

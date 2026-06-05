@@ -31,7 +31,7 @@ export const formatSize = (size: number | null): string => {
 
 export const getPathLabel = (targetPath: string): string => {
   if (!targetPath) {
-    return 'Loading'
+    return '加载中'
   }
 
   const normalizedPath = targetPath.replaceAll('\\', '/')

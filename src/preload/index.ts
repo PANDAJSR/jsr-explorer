@@ -10,6 +10,15 @@ contextBridge.exposeInMainWorld('electron', {
     getFileIcon: (targetPath: string) => ipcRenderer.invoke('file-manager:get-file-icon', targetPath),
     copyPathsToDirectory: (sourcePaths: string[], destinationDirectory: string) =>
       ipcRenderer.invoke('file-manager:copy-paths-to-directory', sourcePaths, destinationDirectory),
+    movePathsToDirectory: (sourcePaths: string[], destinationDirectory: string) =>
+      ipcRenderer.invoke('file-manager:move-paths-to-directory', sourcePaths, destinationDirectory),
+    renamePath: (sourcePath: string, newName: string) => ipcRenderer.invoke('file-manager:rename-path', sourcePath, newName),
+    createDirectory: (parentPath: string, name: string) => ipcRenderer.invoke('file-manager:create-directory', parentPath, name),
+    trashPaths: (sourcePaths: string[]) => ipcRenderer.invoke('file-manager:trash-paths', sourcePaths),
+    writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') =>
+      ipcRenderer.invoke('file-manager:write-clipboard-paths', sourcePaths, mode),
+    pasteClipboardPaths: (destinationDirectory: string) =>
+      ipcRenderer.invoke('file-manager:paste-clipboard-paths', destinationDirectory),
     startNativeDrag: (sourcePaths: string[]) => ipcRenderer.send('file-manager:start-native-drag', sourcePaths),
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
     getPlatform: () => ipcRenderer.invoke('file-manager:get-platform')

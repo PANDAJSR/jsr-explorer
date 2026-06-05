@@ -1,8 +1,8 @@
 import { constants } from 'node:fs'
-import { copyFile, cp, readdir, stat } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readdir, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, shell } from 'electron'
 
 type FileManagerEntry = {
   name: string
@@ -17,6 +17,13 @@ type DirectoryPayload = {
   parentPath: string | null
   entries: FileManagerEntry[]
 }
+
+type ClipboardMode = 'copy' | 'cut'
+
+let internalClipboard: {
+  mode: ClipboardMode
+  paths: string[]
+} | null = null
 
 const getParentPath = (directoryPath: string): string | null => {
   const root = parse(directoryPath).root
@@ -43,23 +50,39 @@ const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: st
     }
   }
 
-  throw new Error(`Could not find an available name for ${originalName}`)
+  throw new Error(`无法为 ${originalName} 找到可用名称`)
 }
 
 const fallbackDragIcon = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lkR6WQAAAABJRU5ErkJggg=='
 )
 
+const escapeXml = (value: string): string =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+
+const unescapeXml = (value: string): string =>
+  value
+    .replaceAll('&apos;', "'")
+    .replaceAll('&quot;', '"')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&amp;', '&')
+
 const copyPathToDirectory = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
   const sourceStats = await stat(sourcePath)
   const destinationStats = await stat(destinationDirectory)
 
   if (!sourceStats.isFile() && !sourceStats.isDirectory()) {
-    throw new Error('Only files and folders can be copied.')
+    throw new Error('只能复制文件和文件夹。')
   }
 
   if (!destinationStats.isDirectory()) {
-    throw new Error(`${destinationDirectory} is not a directory`)
+    throw new Error(`${destinationDirectory} 不是文件夹`)
   }
 
   const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
@@ -77,6 +100,82 @@ const copyPathToDirectory = async (sourcePath: string, destinationDirectory: str
   return destinationPath
 }
 
+const movePathToDirectory = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
+  const destinationStats = await stat(destinationDirectory)
+
+  if (!destinationStats.isDirectory()) {
+    throw new Error(`${destinationDirectory} 不是文件夹`)
+  }
+
+  const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
+
+  try {
+    await rename(sourcePath, destinationPath)
+  } catch {
+    await cp(sourcePath, destinationPath, {
+      errorOnExist: true,
+      force: false,
+      recursive: true
+    })
+    await shell.trashItem(sourcePath)
+  }
+
+  return destinationPath
+}
+
+const writeClipboardPaths = (sourcePaths: string[], mode: ClipboardMode): void => {
+  const paths = sourcePaths.filter(Boolean)
+  internalClipboard = { mode, paths }
+
+  const uriList = paths.map((path) => `file://${encodeURI(path)}`).join('\n')
+  clipboard.writeText(uriList || paths.join('\n'))
+
+  if (process.platform === 'darwin') {
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><array>${paths.map((path) => `<string>${escapeXml(path)}</string>`).join('')}</array></plist>`
+    clipboard.writeBuffer('NSFilenamesPboardType', Buffer.from(plist))
+  }
+
+  if (process.platform === 'win32') {
+    clipboard.writeBuffer('FileNameW', Buffer.from(`${paths.join('\0')}\0\0`, 'utf16le'))
+    const effect = Buffer.alloc(4)
+    effect.writeUInt32LE(mode === 'cut' ? 2 : 1, 0)
+    clipboard.writeBuffer('Preferred DropEffect', effect)
+  }
+}
+
+const readClipboardPaths = (): {
+  mode: ClipboardMode
+  paths: string[]
+} => {
+  const formats = clipboard.availableFormats()
+  const text = clipboard.readText()
+  const parsedTextPaths = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => (line.startsWith('file://') ? decodeURIComponent(line.replace('file://', '')) : line))
+
+  if (parsedTextPaths.length > 0) {
+    return { mode: internalClipboard?.mode ?? 'copy', paths: parsedTextPaths }
+  }
+
+  if (process.platform === 'darwin' && formats.includes('NSFilenamesPboardType')) {
+    const plist = clipboard.readBuffer('NSFilenamesPboardType').toString()
+    const paths = [...plist.matchAll(/<string>(.*?)<\/string>/g)].map((match) => unescapeXml(match[1]))
+    return { mode: internalClipboard?.mode ?? 'copy', paths }
+  }
+
+  if (process.platform === 'win32' && formats.includes('FileNameW')) {
+    const paths = clipboard.readBuffer('FileNameW').toString('utf16le').split('\0').filter(Boolean)
+    const effect = clipboard.readBuffer('Preferred DropEffect')
+    return { mode: effect.readUInt32LE(0) === 2 ? 'cut' : 'copy', paths }
+  }
+
+  return internalClipboard ?? { mode: 'copy', paths: [] }
+}
+
 const registerFileManagerHandlers = (): void => {
   ipcMain.handle('file-manager:get-home-directory', () => homedir())
 
@@ -84,7 +183,7 @@ const registerFileManagerHandlers = (): void => {
     const directoryStats = await stat(directoryPath)
 
     if (!directoryStats.isDirectory()) {
-      throw new Error(`${directoryPath} is not a directory`)
+      throw new Error(`${directoryPath} 不是文件夹`)
     }
 
     const directoryEntries = await readdir(directoryPath, { withFileTypes: true })
@@ -150,6 +249,58 @@ const registerFileManagerHandlers = (): void => {
     }
 
     return copiedPaths
+  })
+
+  ipcMain.handle('file-manager:move-paths-to-directory', async (_, sourcePaths: string[], destinationDirectory: string) => {
+    const movedPaths: string[] = []
+
+    for (const sourcePath of sourcePaths) {
+      movedPaths.push(await movePathToDirectory(sourcePath, destinationDirectory))
+    }
+
+    return movedPaths
+  })
+
+  ipcMain.handle('file-manager:rename-path', async (_, sourcePath: string, newName: string) => {
+    const destinationPath = join(dirname(sourcePath), newName)
+    await rename(sourcePath, destinationPath)
+    return destinationPath
+  })
+
+  ipcMain.handle('file-manager:create-directory', async (_, parentPath: string, name: string) => {
+    const directoryPath = join(parentPath, name)
+    await mkdir(directoryPath)
+    return directoryPath
+  })
+
+  ipcMain.handle('file-manager:trash-paths', async (_, sourcePaths: string[]) => {
+    for (const sourcePath of sourcePaths) {
+      await shell.trashItem(sourcePath)
+    }
+  })
+
+  ipcMain.handle('file-manager:write-clipboard-paths', (_, sourcePaths: string[], mode: ClipboardMode) => {
+    writeClipboardPaths(sourcePaths, mode)
+  })
+
+  ipcMain.handle('file-manager:paste-clipboard-paths', async (_, destinationDirectory: string) => {
+    const payload = readClipboardPaths()
+    const pastedPaths: string[] = []
+
+    for (const sourcePath of payload.paths) {
+      pastedPaths.push(
+        payload.mode === 'cut'
+          ? await movePathToDirectory(sourcePath, destinationDirectory)
+          : await copyPathToDirectory(sourcePath, destinationDirectory)
+      )
+    }
+
+    if (payload.mode === 'cut') {
+      internalClipboard = null
+      clipboard.clear()
+    }
+
+    return pastedPaths
   })
 
   ipcMain.on('file-manager:start-native-drag', async (event, sourcePaths: string[]) => {

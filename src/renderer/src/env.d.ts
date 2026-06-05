@@ -33,6 +33,12 @@ interface Window {
       getParentDirectory: (directoryPath: string) => Promise<string | null>
       getFileIcon: (targetPath: string) => Promise<string>
       copyPathsToDirectory: (sourcePaths: string[], destinationDirectory: string) => Promise<string[]>
+      movePathsToDirectory: (sourcePaths: string[], destinationDirectory: string) => Promise<string[]>
+      renamePath: (sourcePath: string, newName: string) => Promise<string>
+      createDirectory: (parentPath: string, name: string) => Promise<string>
+      trashPaths: (sourcePaths: string[]) => Promise<void>
+      writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') => Promise<void>
+      pasteClipboardPaths: (destinationDirectory: string) => Promise<string[]>
       startNativeDrag: (sourcePaths: string[]) => void
       getPathForFile: (file: File) => string
       getPlatform: () => Promise<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>
