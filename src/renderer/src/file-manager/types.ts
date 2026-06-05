@@ -121,3 +121,45 @@ export type SplitNode =
       ratio: number
       children: [SplitNode, SplitNode]
     }
+
+export type PersistedFileTabLayout = {
+  kind: 'file'
+  id: string
+  currentPath: string
+  backStack: string[]
+  forwardStack: string[]
+  sortKey: SortKey
+  sortDirection: SortDirection
+}
+
+export type PersistedTerminalTabLayout = {
+  kind: 'terminal'
+  id: string
+  cwd: string
+  title: string
+}
+
+export type PersistedFilePaneLayout = {
+  kind: 'files'
+  id: string
+  tabs: PersistedFileTabLayout[]
+  activeTabId: string
+}
+
+export type PersistedTerminalPaneLayout = {
+  kind: 'terminal'
+  id: string
+  tabs: PersistedTerminalTabLayout[]
+  activeTabId: string
+}
+
+export type PersistedPaneLayout = PersistedFilePaneLayout | PersistedTerminalPaneLayout
+
+export type PersistedFileManagerLayout = {
+  version: 1
+  rootNode: SplitNode
+  panes: PersistedPaneLayout[]
+  focusedPaneId: string
+  secondaryPaneId: string | null
+  lastFocusedFilePath: string
+}

@@ -23,10 +23,11 @@ import {
 import { getDirectionalPaneId } from '../file-manager/focusNavigation'
 import { getPathLabel } from '../file-manager/formatters'
 import { createKeyboardHandler } from '../file-manager/keyboard'
+import { createFileManagerLayoutSnapshot, normalizeFileManagerLayout } from '../file-manager/layoutPersistence'
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
-import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
+import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, PersistedFileManagerLayout, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
 
@@ -93,7 +94,9 @@ const nameDialog = ref<{
 let stopColumnResize: (() => void) | null = null
 let stopSplitResize: (() => void) | null = null
 let stopDirectoryChanged: (() => void) | null = null
-const { cloneTabForPath, createPane, createTerminalPane, createTerminalTab } = createStateFactory()
+let persistLayoutTimer: number | null = null
+let isLayoutHydrated = false
+const { cloneTabForPath, createPane, createTab, createTerminalPane, createTerminalTab } = createStateFactory()
 const initialPane = createPane('')
 panes[initialPane.id] = initialPane
 focusedPaneId.value = initialPane.id
@@ -255,6 +258,100 @@ const refreshDirectory = async (tab: FileTabState, directoryPath: string): Promi
       tab.errorMessage = error instanceof Error ? error.message : '无法刷新文件夹。'
     }
   }
+}
+const createLayoutSnapshot = (): PersistedFileManagerLayout =>
+  createFileManagerLayoutSnapshot(
+    panes,
+    rootNode.value,
+    focusedPaneId.value,
+    secondaryPaneId.value,
+    lastFocusedFilePath.value
+  )
+const saveLayout = (): void => {
+  if (!isLayoutHydrated) {
+    return
+  }
+
+  window.electron.fileManager.saveLayout(createLayoutSnapshot()).catch((error) => {
+    console.error('Failed to save file manager layout.', error)
+  })
+}
+const scheduleLayoutSave = (): void => {
+  if (!isLayoutHydrated) {
+    return
+  }
+
+  if (persistLayoutTimer !== null) {
+    window.clearTimeout(persistLayoutTimer)
+  }
+
+  persistLayoutTimer = window.setTimeout(() => {
+    persistLayoutTimer = null
+    saveLayout()
+  }, 200)
+}
+const loadDefaultHomeLayout = async (): Promise<void> => {
+  const homeDirectory = await window.electron.fileManager.getHomeDirectory()
+  const tab = focusedTab.value
+
+  if (tab) {
+    tab.currentPath = homeDirectory
+    lastFocusedFilePath.value = homeDirectory
+    await loadDirectory(tab, homeDirectory, false)
+  }
+}
+const replacePanes = (nextPanes: PaneState[]): void => {
+  for (const paneId of Object.keys(panes)) {
+    delete panes[paneId]
+  }
+
+  for (const pane of nextPanes) {
+    panes[pane.id] = reactive(pane) as PaneState
+  }
+}
+const restoreLayout = async (layout: PersistedFileManagerLayout): Promise<void> => {
+  const nextPanes = layout.panes.map((paneLayout): PaneState => {
+    if (paneLayout.kind === 'terminal') {
+      const pane = createTerminalPane(paneLayout.tabs[0].cwd, paneLayout.id, paneLayout.tabs[0].id)
+      pane.tabs = paneLayout.tabs.map((tabLayout) => ({
+        ...createTerminalTab(tabLayout.cwd, tabLayout.id),
+        title: tabLayout.title || 'Terminal'
+      }))
+      pane.activeTabId = pane.tabs.some((tab) => tab.id === paneLayout.activeTabId)
+        ? paneLayout.activeTabId
+        : pane.tabs[0].id
+      return pane
+    }
+
+    const pane = createPane(paneLayout.tabs[0].currentPath, paneLayout.id, paneLayout.tabs[0].id)
+    pane.tabs = paneLayout.tabs.map((tabLayout) => ({
+      ...createTab(tabLayout.currentPath, tabLayout.id),
+      backStack: [...tabLayout.backStack],
+      forwardStack: [...tabLayout.forwardStack],
+      sortKey: tabLayout.sortKey,
+      sortDirection: tabLayout.sortDirection
+    }))
+    pane.activeTabId = pane.tabs.some((tab) => tab.id === paneLayout.activeTabId) ? paneLayout.activeTabId : pane.tabs[0].id
+    return pane
+  })
+
+  replacePanes(nextPanes)
+  rootNode.value = layout.rootNode
+  focusedPaneId.value = panes[layout.focusedPaneId] ? layout.focusedPaneId : findFirstPaneId(rootNode.value)
+  secondaryPaneId.value = layout.secondaryPaneId && panes[layout.secondaryPaneId] ? layout.secondaryPaneId : null
+  lastFocusedFilePath.value = layout.lastFocusedFilePath
+
+  await Promise.all(getOpenTabs().map((tab) => loadDirectory(tab, tab.currentPath, false)))
+}
+const hydrateLayout = async (): Promise<void> => {
+  const persistedLayout = normalizeFileManagerLayout(await window.electron.fileManager.readLayout())
+
+  if (persistedLayout) {
+    await restoreLayout(persistedLayout)
+    return
+  }
+
+  await loadDefaultHomeLayout()
 }
 const openEntry = async (tab: FileTabState, entry: FileManagerEntry): Promise<void> => {
   tab.errorMessage = ''
@@ -786,9 +883,19 @@ const handleKeydown = (event: KeyboardEvent): void => {
     }
   }
 }
+const handleBeforeUnload = (): void => {
+  if (isLayoutHydrated) {
+    window.electron.fileManager.saveLayoutBeforeUnload(createLayoutSnapshot())
+  }
+}
 const stopWatchedDirectorySync = watch(
   () => getOpenDirectoryPaths().sort((left, right) => left.localeCompare(right)).join('\n'),
   syncWatchedDirectories
+)
+const stopLayoutPersistence = watch(
+  () => createLayoutSnapshot(),
+  scheduleLayoutSave,
+  { deep: true, flush: 'post' }
 )
 const SplitNodeView = defineComponent({
   name: 'SplitNodeView',
@@ -886,6 +993,7 @@ const SplitNodeView = defineComponent({
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousedown', hideContextMenu)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   stopDirectoryChanged = window.electron.fileManager.onDirectoryChanged((directoryPath) => {
     for (const tab of getOpenTabs()) {
       if (tab.currentPath === directoryPath) {
@@ -895,22 +1003,25 @@ onMounted(async () => {
   })
   favorites.value = readFavoritePaths()
   platform.value = await window.electron.fileManager.getPlatform()
-  const homeDirectory = await window.electron.fileManager.getHomeDirectory()
-  const tab = focusedTab.value
-  if (tab) {
-    tab.currentPath = homeDirectory
-    lastFocusedFilePath.value = homeDirectory
-    await loadDirectory(tab, homeDirectory, false)
-  }
+  await hydrateLayout()
+  isLayoutHydrated = true
+  saveLayout()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('mousedown', hideContextMenu)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   stopDirectoryChanged?.()
   stopWatchedDirectorySync()
+  stopLayoutPersistence()
   void window.electron.fileManager.watchDirectories([])
   stopColumnResize?.()
   stopSplitResize?.()
+  if (persistLayoutTimer !== null) {
+    window.clearTimeout(persistLayoutTimer)
+    persistLayoutTimer = null
+  }
+  saveLayout()
 })
 return {
   ArchiveDialog,

@@ -1,5 +1,5 @@
 import { constants, watch, type FSWatcher } from 'node:fs'
-import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -269,6 +269,25 @@ const getParentPath = (directoryPath: string): string | null => {
   return dirname(directoryPath)
 }
 
+const getLayoutFilePath = (): string => join(app.getPath('userData'), layoutFileName)
+
+const readPersistedLayout = async (): Promise<unknown | null> => {
+  try {
+    return JSON.parse(await readFile(getLayoutFilePath(), 'utf8')) as unknown
+  } catch {
+    return null
+  }
+}
+
+const writePersistedLayout = async (layout: unknown): Promise<void> => {
+  const layoutPath = getLayoutFilePath()
+  const temporaryPath = `${layoutPath}.${process.pid}.${Date.now()}.tmp`
+
+  await mkdir(dirname(layoutPath), { recursive: true })
+  await writeFile(temporaryPath, JSON.stringify(layout), 'utf8')
+  await rename(temporaryPath, layoutPath)
+}
+
 const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
   const originalName = basename(sourcePath)
   const extension = extname(originalName)
@@ -326,6 +345,7 @@ const fallbackDragIcon = nativeImage.createFromDataURL(
 )
 
 const previewScheme = 'jsr-file-preview'
+const layoutFileName = 'file-manager-layout.json'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -876,6 +896,16 @@ const readClipboardPaths = (): {
 
 const registerFileManagerHandlers = (): void => {
   ipcMain.handle('file-manager:get-home-directory', () => homedir())
+
+  ipcMain.handle('file-manager:read-layout', () => readPersistedLayout())
+
+  ipcMain.handle('file-manager:save-layout', async (_, layout: unknown) => {
+    await writePersistedLayout(layout)
+  })
+
+  ipcMain.on('file-manager:save-layout-before-unload', (_, layout: unknown) => {
+    void writePersistedLayout(layout)
+  })
 
   ipcMain.handle('file-manager:list-directory', async (_, directoryPath: string): Promise<DirectoryPayload> => {
     const directoryStats = await stat(directoryPath)

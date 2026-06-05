@@ -38,7 +38,10 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('file-manager:paste-clipboard-paths', destinationDirectory),
     startNativeDrag: (sourcePaths: string[]) => ipcRenderer.send('file-manager:start-native-drag', sourcePaths),
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
-    getPlatform: () => ipcRenderer.invoke('file-manager:get-platform')
+    getPlatform: () => ipcRenderer.invoke('file-manager:get-platform'),
+    readLayout: () => ipcRenderer.invoke('file-manager:read-layout'),
+    saveLayout: (layout: unknown) => ipcRenderer.invoke('file-manager:save-layout', layout),
+    saveLayoutBeforeUnload: (layout: unknown) => ipcRenderer.send('file-manager:save-layout-before-unload', layout)
   },
   terminal: {
     create: (options: { id: string; cwd: string; cols: number; rows: number }) => ipcRenderer.invoke('terminal:create', options),

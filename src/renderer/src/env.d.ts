@@ -64,6 +64,53 @@ type QuickPreviewPayload =
       totalEntries: number
     }
 
+type PersistedSplitNode =
+  | {
+      type: 'pane'
+      paneId: string
+    }
+  | {
+      type: 'split'
+      direction: 'horizontal' | 'vertical'
+      ratio: number
+      children: [PersistedSplitNode, PersistedSplitNode]
+    }
+
+type PersistedFileManagerLayout = {
+  version: 1
+  rootNode: PersistedSplitNode
+  panes: Array<
+    | {
+        kind: 'files'
+        id: string
+        tabs: Array<{
+          kind: 'file'
+          id: string
+          currentPath: string
+          backStack: string[]
+          forwardStack: string[]
+          sortKey: 'name' | 'modifiedAt' | 'size'
+          sortDirection: 'asc' | 'desc'
+        }>
+        activeTabId: string
+      }
+    | {
+        kind: 'terminal'
+        id: string
+        tabs: Array<{
+          kind: 'terminal'
+          id: string
+          cwd: string
+          title: string
+        }>
+        activeTabId: string
+      }
+  >
+  focusedPaneId: string
+  secondaryPaneId: string | null
+  lastFocusedFilePath: string
+}
+
 interface Window {
   electron: {
     fileManager: {
@@ -90,6 +137,9 @@ interface Window {
       startNativeDrag: (sourcePaths: string[]) => void
       getPathForFile: (file: File) => string
       getPlatform: () => Promise<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>
+      readLayout: () => Promise<unknown>
+      saveLayout: (layout: PersistedFileManagerLayout) => Promise<void>
+      saveLayoutBeforeUnload: (layout: PersistedFileManagerLayout) => void
     }
     terminal: {
       create: (options: { id: string; cwd: string; cols: number; rows: number }) => Promise<{
