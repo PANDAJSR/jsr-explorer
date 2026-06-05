@@ -24,6 +24,15 @@ type OpenPathResult =
       path: string
     }
 
+type ArchiveFormat = 'zip' | 'tar.gz'
+
+type ArchiveCreationOptions = {
+  format: ArchiveFormat
+  compressionLevel: number
+  password: string
+  outputName: string
+}
+
 type ArchivePreviewEntry = {
   name: string
   compressedSize: number
@@ -68,6 +77,11 @@ interface Window {
       movePathsToDirectory: (sourcePaths: string[], destinationDirectory: string) => Promise<string[]>
       renamePath: (sourcePath: string, newName: string) => Promise<string>
       createDirectory: (parentPath: string, name: string) => Promise<string>
+      createArchive: (
+        sourcePaths: string[],
+        destinationDirectory: string,
+        options: ArchiveCreationOptions
+      ) => Promise<string>
       trashPaths: (sourcePaths: string[]) => Promise<void>
       writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') => Promise<void>
       pasteClipboardPaths: (destinationDirectory: string) => Promise<string[]>

@@ -3,6 +3,9 @@ import { useFileManager } from './composables/useFileManager'
 
 const {
   addCurrentPathToFavorites,
+  ArchiveDialog,
+  archiveDialog,
+  cancelArchiveDialog,
   cancelNameDialog,
   closeQuickPreview,
   ContextMenu,
@@ -20,6 +23,7 @@ const {
   reorderFavoritePaths,
   rootNode,
   SplitNodeView,
+  submitArchiveDialog,
   submitNameDialog
 } = useFileManager()
 </script>
@@ -28,6 +32,13 @@ const {
   <main class="file-manager">
     <SplitNodeView :node="rootNode" />
     <ContextMenu v-if="contextMenu" :items="contextMenu.items" :x="contextMenu.x" :y="contextMenu.y" />
+    <ArchiveDialog
+      v-if="archiveDialog"
+      :default-file-name="archiveDialog.defaultFileName"
+      :selected-count="archiveDialog.selectedCount"
+      @cancel="cancelArchiveDialog"
+      @submit="submitArchiveDialog"
+    />
     <FavoritesManager
       v-if="isFavoritesManagerOpen && focusedTab"
       :current-path="focusedTab.currentPath"

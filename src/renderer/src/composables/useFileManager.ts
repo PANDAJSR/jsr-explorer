@@ -1,4 +1,5 @@
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, type PropType } from 'vue'
+import ArchiveDialog from '../components/ArchiveDialog.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import FavoritesManager from '../components/FavoritesManager.vue'
 import FilePane from '../components/FilePane.vue'
@@ -7,9 +8,11 @@ import QuickPreview from '../components/QuickPreview.vue'
 import {
   copySelectionToClipboard,
   copySelectionToSecondary,
+  createArchiveFromSelection,
   createFolder,
   cutSelectionToClipboard,
   duplicateSelection,
+  getSelectedEntries,
   pasteClipboardIntoTab,
   renameActiveItem,
   trashSelection
@@ -20,7 +23,7 @@ import { createKeyboardHandler } from '../file-manager/keyboard'
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
-import type { ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
+import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
 
@@ -62,6 +65,11 @@ const secondaryPaneId = ref<string | null>(null)
 const favorites = ref<FavoritePath[]>([])
 const isFavoritesManagerOpen = ref(false)
 const quickPreview = ref<QuickPreviewState | null>(null)
+const archiveDialog = ref<{
+  defaultFileName: string
+  selectedCount: number
+  tab: FileTabState
+} | null>(null)
 const iconCache = reactive<Record<string, string>>({})
 const columns = reactive<Record<ColumnKey, number>>({
   name: 520,
@@ -472,6 +480,46 @@ const jumpToFavoriteIndex = (index: number): void => {
     void jumpToFavorite(favorite)
   }
 }
+const getArchiveDefaultFileName = (tab: FileTabState): string => {
+  const selectedEntries = getSelectedEntries(tab)
+
+  if (selectedEntries.length === 1) {
+    return `${selectedEntries[0].name}.zip`
+  }
+
+  return `${getPathLabel(tab.currentPath) || 'Archive'}.zip`
+}
+const showArchiveDialog = (tab = focusedTab.value): void => {
+  if (!tab) {
+    return
+  }
+
+  const selectedEntries = getSelectedEntries(tab)
+
+  if (selectedEntries.length === 0) {
+    tab.errorMessage = '未选择对象。'
+    return
+  }
+
+  archiveDialog.value = {
+    defaultFileName: getArchiveDefaultFileName(tab),
+    selectedCount: selectedEntries.length,
+    tab
+  }
+}
+const closeArchiveDialog = (): void => {
+  archiveDialog.value = null
+}
+const submitArchiveDialog = (options: ArchiveCreationOptions): void => {
+  const dialog = archiveDialog.value
+
+  if (!dialog) {
+    return
+  }
+
+  archiveDialog.value = null
+  void createArchiveFromSelection(dialog.tab, loadDirectory, options)
+}
 const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
   event.preventDefault()
   const hasSelection = tab.selectedPaths.length > 0
@@ -486,6 +534,7 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
       { label: '复制', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void copySelectionToClipboard(tab)) },
       { label: '剪切', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void cutSelectionToClipboard(tab)) },
       { label: '复制并粘贴', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void duplicateSelection(tab, loadDirectory)) },
+      { label: '打压缩包', enabled: hasSelectionTarget && hasSelection, action: wrap(() => showArchiveDialog(tab)) },
       { label: '重命名', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory, requestName)) },
       { label: '删除', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void trashSelection(tab, loadDirectory)) },
       { label: '粘贴', enabled: true, action: wrap(() => void pasteClipboardIntoTab(tab, loadDirectory)) },
@@ -494,6 +543,7 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
   }
 }
 const handleFileManagerKeydown = createKeyboardHandler(platform, {
+  archive: () => showArchiveDialog(),
   clearSelection,
   closeTab: closeFocusedTab,
   copy: () => runOnFocusedTab(copySelectionToClipboard),
@@ -518,6 +568,10 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
 const handleKeydown = (event: KeyboardEvent): void => {
+  if (archiveDialog.value) {
+    return
+  }
+
   if (quickPreview.value) {
     if (event.key === 'Escape' || event.code === 'Space') {
       event.preventDefault()
@@ -620,8 +674,11 @@ onBeforeUnmount(() => {
   stopColumnResize?.()
 })
 return {
+  ArchiveDialog,
+  archiveDialog,
   ContextMenu,
   contextMenu,
+  cancelArchiveDialog: closeArchiveDialog,
   cancelNameDialog: () => closeNameDialog(null),
   closeQuickPreview,
   addCurrentPathToFavorites,
@@ -637,6 +694,7 @@ return {
   removeFavoritePath,
   reorderFavoritePaths,
   rootNode,
+  submitArchiveDialog,
   submitNameDialog: (value: string) => closeNameDialog(value),
   SplitNodeView
 }

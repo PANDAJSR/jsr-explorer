@@ -1,14 +1,14 @@
-import type { FileTabState } from './types'
+import type { ArchiveCreationOptions, FileTabState } from './types'
 
 type LoadDirectory = (tab: FileTabState, directoryPath: string, pushHistory?: boolean) => Promise<void>
 type RequestName = (message: string, defaultValue?: string) => Promise<string | null>
 
-const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
+export const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
   tab.selectedPaths
     .map((path) => tab.entries.find((entry) => entry.path === path))
     .filter((entry): entry is FileManagerEntry => Boolean(entry))
 
-const getSelectedPaths = (tab: FileTabState): string[] => getSelectedEntries(tab).map((entry) => entry.path)
+export const getSelectedPaths = (tab: FileTabState): string[] => getSelectedEntries(tab).map((entry) => entry.path)
 
 const refreshAndSelect = async (tab: FileTabState, paths: string[], loadDirectory: LoadDirectory): Promise<void> => {
   await loadDirectory(tab, tab.currentPath, false)
@@ -61,6 +61,26 @@ export const duplicateSelection = async (tab: FileTabState, loadDirectory: LoadD
     await refreshAndSelect(tab, copiedPaths, loadDirectory)
   } catch (error) {
     tab.errorMessage = error instanceof Error ? error.message : '无法复制并粘贴对象。'
+  }
+}
+
+export const createArchiveFromSelection = async (
+  tab: FileTabState,
+  loadDirectory: LoadDirectory,
+  options: ArchiveCreationOptions
+): Promise<void> => {
+  const selectedPaths = getSelectedPaths(tab)
+
+  if (selectedPaths.length === 0) {
+    tab.errorMessage = '未选择对象。'
+    return
+  }
+
+  try {
+    const archivePath = await window.electron.fileManager.createArchive(selectedPaths, tab.currentPath, options)
+    await refreshAndSelect(tab, [archivePath], loadDirectory)
+  } catch (error) {
+    tab.errorMessage = error instanceof Error ? error.message : '无法创建压缩包。'
   }
 }
 

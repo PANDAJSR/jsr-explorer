@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { inflateRawSync } from 'node:zlib'
+import { spawn } from 'node:child_process'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell } from 'electron'
 
 type FileManagerEntry = {
@@ -21,6 +22,14 @@ type DirectoryPayload = {
 }
 
 type ClipboardMode = 'copy' | 'cut'
+type ArchiveFormat = 'zip' | 'tar.gz'
+
+type ArchiveCreationOptions = {
+  format: ArchiveFormat
+  compressionLevel: number
+  password: string
+  outputName: string
+}
 
 type QuickPreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'document' | 'spreadsheet' | 'archive' | 'model'
 
@@ -86,6 +95,39 @@ const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: st
   }
 
   throw new Error(`无法为 ${originalName} 找到可用名称`)
+}
+
+const getArchiveNameParts = (fileName: string): { extension: string; stem: string } => {
+  if (fileName.toLowerCase().endsWith('.tar.gz')) {
+    return {
+      extension: '.tar.gz',
+      stem: fileName.slice(0, -'.tar.gz'.length)
+    }
+  }
+
+  const extension = extname(fileName)
+
+  return {
+    extension,
+    stem: extension ? fileName.slice(0, -extension.length) : fileName
+  }
+}
+
+const getAvailableOutputPath = async (destinationDirectory: string, fileName: string): Promise<string> => {
+  const { extension, stem } = getArchiveNameParts(fileName)
+
+  for (let index = 0; index < 1000; index += 1) {
+    const nextName = index === 0 ? fileName : `${stem} copy${index === 1 ? '' : ` ${index}`}${extension}`
+    const outputPath = join(destinationDirectory, nextName)
+
+    try {
+      await stat(outputPath)
+    } catch {
+      return outputPath
+    }
+  }
+
+  throw new Error(`无法为 ${fileName} 找到可用名称`)
 }
 
 const fallbackDragIcon = nativeImage.createFromDataURL(
@@ -477,6 +519,117 @@ const movePathToDirectory = async (sourcePath: string, destinationDirectory: str
   return destinationPath
 }
 
+const archiveExtensionByFormat: Record<ArchiveFormat, string> = {
+  zip: '.zip',
+  'tar.gz': '.tar.gz'
+}
+
+const clampCompressionLevel = (value: number): number => Math.max(0, Math.min(9, Math.trunc(value)))
+
+const withArchiveExtension = (fileName: string, format: ArchiveFormat): string => {
+  const trimmedName = fileName.trim()
+  const baseName = trimmedName.replace(/\.(zip|tar\.gz)$/i, '') || 'Archive'
+
+  return `${baseName}${archiveExtensionByFormat[format]}`
+}
+
+const runArchiveCommand = (
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      windowsHide: true
+    })
+    let stderr = ''
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+
+    child.on('error', (error) => {
+      reject(new Error(`无法启动 ${command} 命令：${error.message}`))
+    })
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+
+      reject(new Error(stderr.trim() || `${command} 命令退出，状态码 ${code}`))
+    })
+  })
+
+const createArchive = async (
+  sourcePaths: string[],
+  destinationDirectory: string,
+  options: ArchiveCreationOptions
+): Promise<string> => {
+  const destinationStats = await stat(destinationDirectory)
+
+  if (!destinationStats.isDirectory()) {
+    throw new Error(`${destinationDirectory} 不是文件夹`)
+  }
+
+  if (options.format !== 'zip' && options.format !== 'tar.gz') {
+    throw new Error('不支持的压缩格式。')
+  }
+
+  const uniqueSourcePaths = [...new Set(sourcePaths.filter(Boolean))]
+
+  if (uniqueSourcePaths.length === 0) {
+    throw new Error('未选择对象。')
+  }
+
+  for (const sourcePath of uniqueSourcePaths) {
+    const sourceStats = await stat(sourcePath)
+
+    if (!sourceStats.isFile() && !sourceStats.isDirectory()) {
+      throw new Error('只能压缩文件和文件夹。')
+    }
+
+    if (dirname(sourcePath) !== destinationDirectory) {
+      throw new Error('只能压缩当前文件夹内的对象。')
+    }
+  }
+
+  if (options.outputName.includes('/') || options.outputName.includes('\\')) {
+    throw new Error('生成文件名不能包含路径分隔符。')
+  }
+
+  const outputName = withArchiveExtension(options.outputName, options.format)
+  const outputPath = await getAvailableOutputPath(destinationDirectory, outputName)
+  const entryNames = uniqueSourcePaths.map((sourcePath) => basename(sourcePath))
+  const compressionLevel = clampCompressionLevel(options.compressionLevel)
+
+  if (options.format === 'zip') {
+    const args = ['-r', `-${compressionLevel}`]
+
+    if (options.password) {
+      args.push('-P', options.password)
+    }
+
+    await runArchiveCommand('zip', [...args, outputPath, '--', ...entryNames], destinationDirectory)
+    return outputPath
+  }
+
+  if (options.password) {
+    throw new Error('TAR.GZ 格式不支持密码。')
+  }
+
+  await runArchiveCommand('tar', ['-czf', outputPath, '--', ...entryNames], destinationDirectory, {
+    ...process.env,
+    GZIP: `-${compressionLevel}`
+  })
+
+  return outputPath
+}
+
 const writeClipboardPaths = (sourcePaths: string[], mode: ClipboardMode): void => {
   const paths = sourcePaths.filter(Boolean)
   internalClipboard = { mode, paths }
@@ -671,6 +824,12 @@ const registerFileManagerHandlers = (): void => {
     await mkdir(directoryPath)
     return directoryPath
   })
+
+  ipcMain.handle(
+    'file-manager:create-archive',
+    async (_, sourcePaths: string[], destinationDirectory: string, options: ArchiveCreationOptions) =>
+      createArchive(sourcePaths, destinationDirectory, options)
+  )
 
   ipcMain.handle('file-manager:trash-paths', async (_, sourcePaths: string[]) => {
     for (const sourcePath of sourcePaths) {

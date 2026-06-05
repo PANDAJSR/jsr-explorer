@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { MoveDirection, Platform, SplitDirection } from './types'
 
 type KeyboardActions = {
+  archive: () => void
   clearSelection: () => void
   copySelectedToSecondary: () => void
   createTab: () => void
@@ -83,6 +84,12 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
     if (event.shiftKey && event.key.toLowerCase() === 'f' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.newFolder()
+      return
+    }
+
+    if (event.shiftKey && event.key.toLowerCase() === 'z' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.archive()
       return
     }
 

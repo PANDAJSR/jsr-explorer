@@ -116,6 +116,105 @@ button {
   gap: 8px;
 }
 
+.archive-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(31 41 51 / 28%);
+}
+
+.archive-dialog {
+  display: flex;
+  width: min(460px, 100%);
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  color: #25313d;
+  background: #ffffff;
+  border: 1px solid #c8d0d9;
+  border-radius: 7px;
+  box-shadow: 0 16px 48px rgb(31 41 51 / 22%);
+}
+
+.archive-dialog-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.archive-dialog-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.archive-dialog-header span {
+  color: #657384;
+  font-size: 13px;
+}
+
+.archive-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.archive-input,
+.archive-select {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  color: #25313d;
+  background: #ffffff;
+  border: 1px solid #c8d0d9;
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  font: inherit;
+  font-weight: 400;
+}
+
+.archive-input:focus,
+.archive-select:focus {
+  border-color: #73a7f7;
+  outline-color: #c9ddff;
+}
+
+.archive-input:disabled {
+  color: #8a96a3;
+  background: #edf1f4;
+}
+
+.archive-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 10px;
+}
+
+.archive-range {
+  width: 100%;
+}
+
+.archive-range-value {
+  color: #344250;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.archive-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .quick-preview-backdrop {
   position: fixed;
   inset: 0;

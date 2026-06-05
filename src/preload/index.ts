@@ -15,6 +15,16 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('file-manager:move-paths-to-directory', sourcePaths, destinationDirectory),
     renamePath: (sourcePath: string, newName: string) => ipcRenderer.invoke('file-manager:rename-path', sourcePath, newName),
     createDirectory: (parentPath: string, name: string) => ipcRenderer.invoke('file-manager:create-directory', parentPath, name),
+    createArchive: (
+      sourcePaths: string[],
+      destinationDirectory: string,
+      options: {
+        format: 'zip' | 'tar.gz'
+        compressionLevel: number
+        password: string
+        outputName: string
+      }
+    ) => ipcRenderer.invoke('file-manager:create-archive', sourcePaths, destinationDirectory, options),
     trashPaths: (sourcePaths: string[]) => ipcRenderer.invoke('file-manager:trash-paths', sourcePaths),
     writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') =>
       ipcRenderer.invoke('file-manager:write-clipboard-paths', sourcePaths, mode),

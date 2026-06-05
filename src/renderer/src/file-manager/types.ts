@@ -6,6 +6,14 @@ export type MoveDirection = 'left' | 'right' | 'up' | 'down'
 export type Platform = 'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'
 export type FocusState = 'primary' | 'secondary' | 'none'
 export type QuickPreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'document' | 'spreadsheet' | 'archive' | 'model'
+export type ArchiveFormat = 'zip' | 'tar.gz'
+
+export type ArchiveCreationOptions = {
+  format: ArchiveFormat
+  compressionLevel: number
+  password: string
+  outputName: string
+}
 
 export type ArchivePreviewEntry = {
   name: string
