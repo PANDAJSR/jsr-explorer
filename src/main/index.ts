@@ -1,8 +1,9 @@
 import { constants } from 'node:fs'
-import { copyFile, cp, mkdir, readdir, rename, stat } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { inflateRawSync } from 'node:zlib'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell } from 'electron'
 
 type FileManagerEntry = {
@@ -21,12 +22,38 @@ type DirectoryPayload = {
 
 type ClipboardMode = 'copy' | 'cut'
 
-type QuickPreviewKind = 'image' | 'video' | 'audio'
+type QuickPreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'document' | 'spreadsheet' | 'archive' | 'model'
 
-type QuickPreviewPayload = {
-  kind: QuickPreviewKind
-  sourceUrl: string
+type ArchivePreviewEntry = {
+  name: string
+  compressedSize: number
+  uncompressedSize: number
+  isDirectory: boolean
 }
+
+type SpreadsheetPreviewSheet = {
+  name: string
+  rows: string[][]
+}
+
+type QuickPreviewPayload =
+  | {
+      kind: 'image' | 'video' | 'audio' | 'pdf' | 'model'
+      sourceUrl: string
+    }
+  | {
+      kind: 'text' | 'document'
+      text: string
+    }
+  | {
+      kind: 'spreadsheet'
+      sheets: SpreadsheetPreviewSheet[]
+    }
+  | {
+      kind: 'archive'
+      entries: ArchivePreviewEntry[]
+      totalEntries: number
+    }
 
 let internalClipboard: {
   mode: ClipboardMode
@@ -82,8 +109,54 @@ protocol.registerSchemesAsPrivileged([
 const previewExtensions: Record<QuickPreviewKind, Set<string>> = {
   image: new Set(['.apng', '.avif', '.bmp', '.gif', '.ico', '.jpg', '.jpeg', '.png', '.svg', '.webp']),
   video: new Set(['.m4v', '.mov', '.mp4', '.ogg', '.ogv', '.webm']),
-  audio: new Set(['.aac', '.flac', '.m4a', '.mp3', '.oga', '.ogg', '.opus', '.wav', '.webm'])
+  audio: new Set(['.aac', '.flac', '.m4a', '.mp3', '.oga', '.ogg', '.opus', '.wav', '.webm']),
+  pdf: new Set(['.pdf']),
+  text: new Set([
+    '.c',
+    '.conf',
+    '.cpp',
+    '.cs',
+    '.css',
+    '.csv',
+    '.go',
+    '.h',
+    '.hpp',
+    '.html',
+    '.ini',
+    '.java',
+    '.js',
+    '.json',
+    '.jsx',
+    '.log',
+    '.md',
+    '.mjs',
+    '.py',
+    '.rb',
+    '.rs',
+    '.sh',
+    '.sql',
+    '.svelte',
+    '.toml',
+    '.ts',
+    '.tsx',
+    '.txt',
+    '.vue',
+    '.xml',
+    '.yaml',
+    '.yml'
+  ]),
+  document: new Set(['.docx']),
+  spreadsheet: new Set(['.xlsx']),
+  archive: new Set(['.zip']),
+  model: new Set(['.glb', '.stl'])
 }
+
+const streamPreviewKinds = new Set<QuickPreviewKind>(['image', 'video', 'audio', 'pdf', 'model'])
+const maxTextPreviewBytes = 512 * 1024
+const maxZipPreviewEntries = 250
+const maxDocumentTextLength = 120_000
+const maxSpreadsheetRows = 200
+const maxSpreadsheetColumns = 80
 
 const getPreviewKind = (targetPath: string): QuickPreviewKind | null => {
   const extension = extname(targetPath).toLowerCase()
@@ -124,6 +197,235 @@ const unescapeXml = (value: string): string =>
     .replaceAll('&gt;', '>')
     .replaceAll('&lt;', '<')
     .replaceAll('&amp;', '&')
+
+const decodeXmlText = (value: string): string => unescapeXml(value.replaceAll(/<[^>]+>/g, ''))
+
+const isLikelyTextBuffer = (buffer: Buffer): boolean => {
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8192))
+
+  if (sample.includes(0)) {
+    return false
+  }
+
+  const suspiciousBytes = sample.filter((byte) => byte < 7 || (byte > 14 && byte < 32)).length
+  return sample.length === 0 || suspiciousBytes / sample.length < 0.08
+}
+
+const readTextPreview = async (targetPath: string): Promise<string> => {
+  const buffer = await readFile(targetPath)
+
+  if (!isLikelyTextBuffer(buffer)) {
+    throw new Error('暂不支持预览该文件格式。')
+  }
+
+  const previewBuffer = buffer.subarray(0, maxTextPreviewBytes)
+  const text = previewBuffer.toString('utf8')
+
+  return buffer.length > maxTextPreviewBytes ? `${text}\n\n... 文件较大，仅显示前 ${maxTextPreviewBytes} 字节。` : text
+}
+
+type ZipEntry = ArchivePreviewEntry & {
+  compressionMethod: number
+  dataOffset: number
+}
+
+const readZipEntries = (buffer: Buffer): ZipEntry[] => {
+  const eocdSignature = 0x06054b50
+  const centralDirectorySignature = 0x02014b50
+  const localFileSignature = 0x04034b50
+  const searchStart = Math.max(0, buffer.length - 66000)
+  let eocdOffset = -1
+
+  for (let offset = buffer.length - 22; offset >= searchStart; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === eocdSignature) {
+      eocdOffset = offset
+      break
+    }
+  }
+
+  if (eocdOffset === -1) {
+    throw new Error('无法读取 zip 文件。')
+  }
+
+  const entryCount = buffer.readUInt16LE(eocdOffset + 10)
+  let offset = buffer.readUInt32LE(eocdOffset + 16)
+  const entries: ZipEntry[] = []
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (buffer.readUInt32LE(offset) !== centralDirectorySignature) {
+      break
+    }
+
+    const generalPurposeFlag = buffer.readUInt16LE(offset + 8)
+    const compressionMethod = buffer.readUInt16LE(offset + 10)
+    const compressedSize = buffer.readUInt32LE(offset + 20)
+    const uncompressedSize = buffer.readUInt32LE(offset + 24)
+    const fileNameLength = buffer.readUInt16LE(offset + 28)
+    const extraFieldLength = buffer.readUInt16LE(offset + 30)
+    const fileCommentLength = buffer.readUInt16LE(offset + 32)
+    const localHeaderOffset = buffer.readUInt32LE(offset + 42)
+    const nameBuffer = buffer.subarray(offset + 46, offset + 46 + fileNameLength)
+    const name = nameBuffer.toString(generalPurposeFlag & 0x0800 ? 'utf8' : 'utf8')
+
+    if (buffer.readUInt32LE(localHeaderOffset) !== localFileSignature) {
+      offset += 46 + fileNameLength + extraFieldLength + fileCommentLength
+      continue
+    }
+
+    const localFileNameLength = buffer.readUInt16LE(localHeaderOffset + 26)
+    const localExtraFieldLength = buffer.readUInt16LE(localHeaderOffset + 28)
+    const dataOffset = localHeaderOffset + 30 + localFileNameLength + localExtraFieldLength
+
+    entries.push({
+      name,
+      compressedSize,
+      uncompressedSize,
+      isDirectory: name.endsWith('/'),
+      compressionMethod,
+      dataOffset
+    })
+
+    offset += 46 + fileNameLength + extraFieldLength + fileCommentLength
+  }
+
+  return entries
+}
+
+const extractZipEntryText = (buffer: Buffer, entries: ZipEntry[], entryName: string): string | null => {
+  const entry = entries.find((item) => item.name === entryName)
+
+  if (!entry || entry.isDirectory || entry.uncompressedSize > maxTextPreviewBytes * 4) {
+    return null
+  }
+
+  const compressedData = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressedSize)
+
+  if (entry.compressionMethod === 0) {
+    return compressedData.toString('utf8')
+  }
+
+  if (entry.compressionMethod === 8) {
+    return inflateRawSync(compressedData).toString('utf8')
+  }
+
+  return null
+}
+
+const readArchivePreview = async (targetPath: string): Promise<Extract<QuickPreviewPayload, { kind: 'archive' }>> => {
+  const buffer = await readFile(targetPath)
+  const entries = readZipEntries(buffer)
+
+  return {
+    kind: 'archive',
+    totalEntries: entries.length,
+    entries: entries.slice(0, maxZipPreviewEntries).map(({ name, compressedSize, uncompressedSize, isDirectory }) => ({
+      name,
+      compressedSize,
+      uncompressedSize,
+      isDirectory
+    }))
+  }
+}
+
+const readDocumentPreview = async (targetPath: string): Promise<Extract<QuickPreviewPayload, { kind: 'document' }>> => {
+  const buffer = await readFile(targetPath)
+  const entries = readZipEntries(buffer)
+  const documentXml = extractZipEntryText(buffer, entries, 'word/document.xml')
+
+  if (!documentXml) {
+    throw new Error('无法读取 Word 文档内容。')
+  }
+
+  const text = decodeXmlText(
+    documentXml
+      .replaceAll(/<w:tab\/>/g, '\t')
+      .replaceAll(/<\/w:p>/g, '\n')
+      .replaceAll(/<\/w:tr>/g, '\n')
+      .replaceAll(/<\/w:tc>/g, '\t')
+  )
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return {
+    kind: 'document',
+    text: text.slice(0, maxDocumentTextLength)
+  }
+}
+
+const getColumnIndex = (cellReference: string): number => {
+  const column = cellReference.match(/^[A-Z]+/)?.[0] ?? 'A'
+  return [...column].reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1
+}
+
+const readSharedStrings = (sharedStringsXml: string | null): string[] => {
+  if (!sharedStringsXml) {
+    return []
+  }
+
+  return [...sharedStringsXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((match) =>
+    decodeXmlText(match[1]).replaceAll(/\s+/g, ' ').trim()
+  )
+}
+
+const parseSheetRows = (sheetXml: string, sharedStrings: string[]): string[][] => {
+  const rows: string[][] = []
+
+  for (const rowMatch of sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const row: string[] = []
+
+    for (const cellMatch of rowMatch[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+      const attributes = cellMatch[1]
+      const body = cellMatch[2]
+      const reference = attributes.match(/\br="([^"]+)"/)?.[1] ?? ''
+      const columnIndex = getColumnIndex(reference)
+
+      if (columnIndex >= maxSpreadsheetColumns) {
+        continue
+      }
+
+      const cellType = attributes.match(/\bt="([^"]+)"/)?.[1] ?? ''
+      const rawValue = body.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1] ?? body.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1] ?? ''
+      const value = cellType === 's' ? sharedStrings[Number(rawValue)] ?? '' : decodeXmlText(rawValue)
+      row[columnIndex] = value
+    }
+
+    if (row.some((value) => value)) {
+      rows.push(row.map((value) => value ?? ''))
+    }
+
+    if (rows.length >= maxSpreadsheetRows) {
+      break
+    }
+  }
+
+  return rows
+}
+
+const readSpreadsheetPreview = async (
+  targetPath: string
+): Promise<Extract<QuickPreviewPayload, { kind: 'spreadsheet' }>> => {
+  const buffer = await readFile(targetPath)
+  const entries = readZipEntries(buffer)
+  const sharedStrings = readSharedStrings(extractZipEntryText(buffer, entries, 'xl/sharedStrings.xml'))
+  const sheetEntries = entries
+    .filter((entry) => /^xl\/worksheets\/sheet\d+\.xml$/.test(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .slice(0, 4)
+
+  const sheets = sheetEntries.map((entry, index) => ({
+    name: `Sheet ${index + 1}`,
+    rows: parseSheetRows(extractZipEntryText(buffer, entries, entry.name) ?? '', sharedStrings)
+  }))
+
+  if (sheets.length === 0) {
+    throw new Error('无法读取 Excel 表格内容。')
+  }
+
+  return {
+    kind: 'spreadsheet',
+    sheets
+  }
+}
 
 const copyPathToDirectory = async (sourcePath: string, destinationDirectory: string): Promise<string> => {
   const sourceStats = await stat(sourcePath)
@@ -303,13 +605,39 @@ const registerFileManagerHandlers = (): void => {
     const kind = getPreviewKind(targetPath)
 
     if (!kind) {
-      throw new Error('暂不支持预览该文件格式。')
+      return {
+        kind: 'text',
+        text: await readTextPreview(targetPath)
+      }
     }
 
-    return {
-      kind,
-      sourceUrl: createPreviewUrl(targetPath)
+    if (streamPreviewKinds.has(kind)) {
+      return {
+        kind,
+        sourceUrl: createPreviewUrl(targetPath)
+      } as Extract<QuickPreviewPayload, { kind: 'image' | 'video' | 'audio' | 'pdf' | 'model' }>
     }
+
+    if (kind === 'text') {
+      return {
+        kind,
+        text: await readTextPreview(targetPath)
+      }
+    }
+
+    if (kind === 'document') {
+      return readDocumentPreview(targetPath)
+    }
+
+    if (kind === 'spreadsheet') {
+      return readSpreadsheetPreview(targetPath)
+    }
+
+    if (kind === 'archive') {
+      return readArchivePreview(targetPath)
+    }
+
+    throw new Error('暂不支持预览该文件格式。')
   })
 
   ipcMain.handle('file-manager:copy-paths-to-directory', async (_, sourcePaths: string[], destinationDirectory: string) => {
@@ -410,7 +738,9 @@ const registerPreviewProtocol = (): void => {
 
     const targetStats = await stat(targetPath)
 
-    if (!targetStats.isFile() || !getPreviewKind(targetPath)) {
+    const kind = getPreviewKind(targetPath)
+
+    if (!targetStats.isFile() || !kind || !streamPreviewKinds.has(kind)) {
       return new Response(null, { status: 404 })
     }
 

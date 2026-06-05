@@ -201,11 +201,7 @@ const previewSelected = async (): Promise<void> => {
 
   try {
     const preview = await window.electron.fileManager.getQuickPreview(entry.path)
-    quickPreview.value = {
-      entryName: entry.name,
-      kind: preview.kind,
-      sourceUrl: preview.sourceUrl
-    }
+    quickPreview.value = { entryName: entry.name, ...preview }
   } catch (error) {
     tab.errorMessage = error instanceof Error ? error.message : '无法预览对象。'
   }

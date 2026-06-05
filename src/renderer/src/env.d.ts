@@ -24,10 +24,36 @@ type OpenPathResult =
       path: string
     }
 
-type QuickPreviewPayload = {
-  kind: 'image' | 'video' | 'audio'
-  sourceUrl: string
+type ArchivePreviewEntry = {
+  name: string
+  compressedSize: number
+  uncompressedSize: number
+  isDirectory: boolean
 }
+
+type SpreadsheetPreviewSheet = {
+  name: string
+  rows: string[][]
+}
+
+type QuickPreviewPayload =
+  | {
+      kind: 'image' | 'video' | 'audio' | 'pdf' | 'model'
+      sourceUrl: string
+    }
+  | {
+      kind: 'text' | 'document'
+      text: string
+    }
+  | {
+      kind: 'spreadsheet'
+      sheets: SpreadsheetPreviewSheet[]
+    }
+  | {
+      kind: 'archive'
+      entries: ArchivePreviewEntry[]
+      totalEntries: number
+    }
 
 interface Window {
   electron: {
