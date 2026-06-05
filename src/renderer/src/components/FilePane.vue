@@ -18,7 +18,9 @@ type PaneState = {
   currentPath: string
   parentPath: string | null
   entries: FileManagerEntry[]
-  selectedPath: string | null
+  selectedPaths: string[]
+  activePath: string | null
+  selectionAnchorPath: string | null
   errorMessage: string
   isLoading: boolean
   backStack: string[]
@@ -200,6 +202,62 @@ const sortIndicator = (key: SortKey): string => {
   return props.pane.sortDirection === 'asc' ? '▲' : '▼'
 }
 
+const selectRange = (entry: FileManagerEntry): void => {
+  const anchorPath = props.pane.selectionAnchorPath ?? props.pane.activePath ?? entry.path
+  const anchorIndex = sortedEntries.value.findIndex((item) => item.path === anchorPath)
+  const entryIndex = sortedEntries.value.findIndex((item) => item.path === entry.path)
+
+  if (entryIndex === -1) {
+    return
+  }
+
+  const resolvedAnchorIndex = anchorIndex === -1 ? entryIndex : anchorIndex
+  const startIndex = Math.min(resolvedAnchorIndex, entryIndex)
+  const endIndex = Math.max(resolvedAnchorIndex, entryIndex)
+
+  props.pane.selectionAnchorPath = sortedEntries.value[resolvedAnchorIndex]?.path ?? entry.path
+  props.pane.activePath = entry.path
+  props.pane.selectedPaths = sortedEntries.value.slice(startIndex, endIndex + 1).map((item) => item.path)
+}
+
+const toggleDiscontinuousSelection = (entry: FileManagerEntry): void => {
+  const selectedPaths = new Set(props.pane.selectedPaths)
+  let activePath = entry.path
+
+  if (selectedPaths.has(entry.path)) {
+    selectedPaths.delete(entry.path)
+    activePath = [...selectedPaths].at(-1) ?? ''
+  } else {
+    selectedPaths.add(entry.path)
+  }
+
+  props.pane.selectedPaths = [...selectedPaths]
+  props.pane.activePath = activePath || null
+  props.pane.selectionAnchorPath = activePath || null
+}
+
+const selectSingleEntry = (entry: FileManagerEntry): void => {
+  props.pane.selectedPaths = [entry.path]
+  props.pane.activePath = entry.path
+  props.pane.selectionAnchorPath = entry.path
+}
+
+const selectEntry = (event: MouseEvent, entry: FileManagerEntry): void => {
+  const primaryModifier = props.platform === 'darwin' ? event.metaKey : event.ctrlKey
+
+  if (event.shiftKey) {
+    selectRange(entry)
+    return
+  }
+
+  if (primaryModifier) {
+    toggleDiscontinuousSelection(entry)
+    return
+  }
+
+  selectSingleEntry(entry)
+}
+
 const startPathEditing = async (): Promise<void> => {
   props.pane.editablePath = props.pane.currentPath
   props.pane.isEditingPath = true
@@ -323,10 +381,10 @@ const submitPathEditing = (): void => {
           v-for="entry in sortedEntries"
           :key="entry.path"
           class="file-row file-grid"
-          :class="{ selected: pane.selectedPath === entry.path }"
+          :class="{ selected: pane.selectedPaths.includes(entry.path), active: pane.activePath === entry.path }"
           type="button"
           :style="columnStyle"
-          @click="pane.selectedPath = entry.path"
+          @click="selectEntry($event, entry)"
           @dblclick="emit('openEntry', pane, entry)"
         >
           <span class="file-cell name-cell">

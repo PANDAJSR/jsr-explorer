@@ -15,7 +15,9 @@ type PaneState = {
   currentPath: string
   parentPath: string | null
   entries: FileManagerEntry[]
-  selectedPath: string | null
+  selectedPaths: string[]
+  activePath: string | null
+  selectionAnchorPath: string | null
   errorMessage: string
   isLoading: boolean
   backStack: string[]
@@ -61,7 +63,9 @@ const createPane = (directoryPath: string): PaneState => ({
   currentPath: directoryPath,
   parentPath: null,
   entries: [],
-  selectedPath: null,
+  selectedPaths: [],
+  activePath: null,
+  selectionAnchorPath: null,
   errorMessage: '',
   isLoading: false,
   backStack: [],
@@ -171,6 +175,36 @@ const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
   }
 }
 
+const sortEntriesForPane = (pane: PaneState): FileManagerEntry[] => {
+  return [...pane.entries].sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === 'directory' ? -1 : 1
+    }
+
+    let result = 0
+
+    if (pane.sortKey === 'name') {
+      result = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+    }
+
+    if (pane.sortKey === 'modifiedAt') {
+      result = left.modifiedAt - right.modifiedAt
+    }
+
+    if (pane.sortKey === 'size') {
+      const leftSize = left.size ?? -1
+      const rightSize = right.size ?? -1
+      result = leftSize - rightSize
+    }
+
+    if (result === 0) {
+      result = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+    }
+
+    return pane.sortDirection === 'asc' ? result : -result
+  })
+}
+
 const loadDirectory = async (pane: PaneState, directoryPath: string, pushHistory = true): Promise<void> => {
   const sequence = (pane.loadSequence += 1)
   pane.errorMessage = ''
@@ -191,7 +225,9 @@ const loadDirectory = async (pane: PaneState, directoryPath: string, pushHistory
     pane.currentPath = payload.path
     pane.parentPath = payload.parentPath
     pane.entries = payload.entries
-    pane.selectedPath = null
+    pane.selectedPaths = []
+    pane.activePath = null
+    pane.selectionAnchorPath = null
     loadFileIcons(payload.entries)
   } catch (error) {
     if (sequence === pane.loadSequence) {
@@ -220,11 +256,57 @@ const openEntry = async (pane: PaneState, entry: FileManagerEntry): Promise<void
 
 const openSelected = async (): Promise<void> => {
   const pane = focusedPane.value
-  const entry = pane?.entries.find((item) => item.path === pane.selectedPath)
+  const entry = pane?.entries.find((item) => item.path === pane.activePath)
 
   if (pane && entry) {
     await openEntry(pane, entry)
   }
+}
+
+const scrollActiveRowIntoView = (paneId: string): void => {
+  window.requestAnimationFrame(() => {
+    document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"] .file-row.active`)?.scrollIntoView({
+      block: 'nearest'
+    })
+  })
+}
+
+const moveSelection = (direction: 'previous' | 'next', extendSelection: boolean): void => {
+  const pane = focusedPane.value
+
+  if (!pane || pane.entries.length === 0) {
+    return
+  }
+
+  const sortedEntries = sortEntriesForPane(pane)
+  const activeIndex = pane.activePath ? sortedEntries.findIndex((entry) => entry.path === pane.activePath) : -1
+  const fallbackIndex = direction === 'next' ? -1 : sortedEntries.length
+  const currentIndex = activeIndex === -1 ? fallbackIndex : activeIndex
+  const nextIndex =
+    direction === 'next' ? Math.min(sortedEntries.length - 1, currentIndex + 1) : Math.max(0, currentIndex - 1)
+  const nextEntry = sortedEntries[nextIndex]
+
+  if (!nextEntry) {
+    return
+  }
+
+  if (extendSelection) {
+    const anchorPath = pane.selectionAnchorPath ?? pane.activePath ?? nextEntry.path
+    const anchorIndex = Math.max(0, sortedEntries.findIndex((entry) => entry.path === anchorPath))
+    const startIndex = Math.min(anchorIndex, nextIndex)
+    const endIndex = Math.max(anchorIndex, nextIndex)
+
+    pane.selectionAnchorPath = sortedEntries[anchorIndex]?.path ?? nextEntry.path
+    pane.activePath = nextEntry.path
+    pane.selectedPaths = sortedEntries.slice(startIndex, endIndex + 1).map((entry) => entry.path)
+    scrollActiveRowIntoView(pane.id)
+    return
+  }
+
+  pane.activePath = nextEntry.path
+  pane.selectionAnchorPath = nextEntry.path
+  pane.selectedPaths = [nextEntry.path]
+  scrollActiveRowIntoView(pane.id)
 }
 
 const goBack = async (pane = focusedPane.value): Promise<void> => {
@@ -412,28 +494,53 @@ const copySelectedFileToSecondaryPane = async (): Promise<void> => {
     return
   }
 
-  const selectedEntry = sourcePane.entries.find((entry) => entry.path === sourcePane.selectedPath)
+  const selectedEntries = sourcePane.selectedPaths
+    .map((path) => sourcePane.entries.find((entry) => entry.path === path))
+    .filter((entry): entry is FileManagerEntry => Boolean(entry))
 
-  if (!selectedEntry) {
+  if (selectedEntries.length === 0) {
     sourcePane.errorMessage = 'No file selected.'
     return
   }
 
-  if (selectedEntry.type !== 'file') {
+  if (selectedEntries.some((entry) => entry.type !== 'file')) {
     sourcePane.errorMessage = 'Only files can be copied.'
     return
   }
 
   try {
-    const copiedPath = await window.electron.fileManager.copyFileToDirectory(selectedEntry.path, targetPane.currentPath)
+    const copiedPaths: string[] = []
+
+    for (const entry of selectedEntries) {
+      copiedPaths.push(await window.electron.fileManager.copyFileToDirectory(entry.path, targetPane.currentPath))
+    }
+
     await loadDirectory(targetPane, targetPane.currentPath, false)
-    targetPane.selectedPath = copiedPath
+    targetPane.selectedPaths = copiedPaths
+    targetPane.activePath = copiedPaths.at(-1) ?? null
+    targetPane.selectionAnchorPath = copiedPaths[0] ?? null
   } catch (error) {
     sourcePane.errorMessage = error instanceof Error ? error.message : 'Unable to copy file.'
   }
 }
 
+const isTextEditingEvent = (event: KeyboardEvent): boolean => {
+  const target = event.target
+
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
+}
+
 const handleKeydown = (event: KeyboardEvent): void => {
+  if (!isTextEditingEvent(event) && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.altKey) {
+    const primaryModifier = platform.value === 'darwin' ? event.metaKey : event.ctrlKey
+
+    if (!primaryModifier) {
+      event.preventDefault()
+      moveSelection(event.key === 'ArrowDown' ? 'next' : 'previous', event.shiftKey)
+      return
+    }
+  }
+
   if (event.altKey) {
     const directionByKey: Partial<Record<string, MoveDirection>> = {
       ArrowLeft: 'left',
@@ -452,7 +559,7 @@ const handleKeydown = (event: KeyboardEvent): void => {
 
   const primaryModifier = platform.value === 'darwin' ? event.metaKey : event.ctrlKey
 
-  if (!primaryModifier) {
+  if (!primaryModifier || isTextEditingEvent(event)) {
     return
   }
 

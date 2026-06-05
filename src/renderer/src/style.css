@@ -389,6 +389,14 @@ button {
   background: #1f6feb;
 }
 
+.file-row.active {
+  box-shadow: inset 3px 0 0 #174ea6;
+}
+
+.file-row.selected.active {
+  box-shadow: inset 3px 0 0 #ffffff;
+}
+
 .file-row.selected .muted,
 .file-row.selected .sort-mark {
   color: #dbeafe;
