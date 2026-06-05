@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 type SortKey = 'name' | 'modifiedAt' | 'size'
 type SortDirection = 'asc' | 'desc'
 type ColumnKey = 'name' | 'modifiedAt' | 'size'
+type PathSegment = {
+  label: string
+  path: string
+}
 
 const entries = ref<FileManagerEntry[]>([])
 const currentPath = ref('')
@@ -18,6 +22,9 @@ const backStack = ref<string[]>([])
 const forwardStack = ref<string[]>([])
 const sortKey = ref<SortKey>('name')
 const sortDirection = ref<SortDirection>('asc')
+const isEditingPath = ref(false)
+const editablePath = ref('')
+const pathInput = ref<HTMLInputElement | null>(null)
 const iconCache = reactive<Record<string, string>>({})
 const columns = reactive<Record<ColumnKey, number>>({
   name: 520,
@@ -35,6 +42,18 @@ const columnStyle = computed(() => ({
 const canGoBack = computed(() => backStack.value.length > 0)
 const canGoForward = computed(() => forwardStack.value.length > 0)
 const canGoUp = computed(() => parentPath.value !== null)
+
+const pathSegments = computed<PathSegment[]>(() => {
+  if (!currentPath.value) {
+    return []
+  }
+
+  if (platform.value === 'win32') {
+    return getWindowsPathSegments(currentPath.value)
+  }
+
+  return getPosixPathSegments(currentPath.value)
+})
 
 const sortedEntries = computed(() => {
   return [...entries.value].sort((left, right) => {
@@ -95,6 +114,65 @@ const formatSize = (size: number | null): string => {
   }
 
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`
+}
+
+const getPosixPathSegments = (targetPath: string): PathSegment[] => {
+  if (targetPath === '/') {
+    return [{ label: '/', path: '/' }]
+  }
+
+  const segments: PathSegment[] = []
+  const names = targetPath.split('/').filter(Boolean)
+  let path = targetPath.startsWith('/') ? '/' : ''
+
+  if (targetPath.startsWith('/')) {
+    segments.push({ label: '/', path: '/' })
+  }
+
+  for (const name of names) {
+    path = path === '/' || path === '' ? `${path}${name}` : `${path}/${name}`
+    segments.push({ label: name, path })
+  }
+
+  return segments
+}
+
+const getWindowsPathSegments = (targetPath: string): PathSegment[] => {
+  const normalizedPath = targetPath.replaceAll('/', '\\')
+  const driveMatch = normalizedPath.match(/^[A-Za-z]:\\?/)
+
+  if (driveMatch) {
+    const driveRoot = `${driveMatch[0].slice(0, 2)}\\`
+    const segments: PathSegment[] = [{ label: driveRoot, path: driveRoot }]
+    const names = normalizedPath.slice(driveMatch[0].length).split('\\').filter(Boolean)
+    let path = driveRoot
+
+    for (const name of names) {
+      path = path.endsWith('\\') ? `${path}${name}` : `${path}\\${name}`
+      segments.push({ label: name, path })
+    }
+
+    return segments
+  }
+
+  if (normalizedPath.startsWith('\\\\')) {
+    const names = normalizedPath.split('\\').filter(Boolean)
+    const shareRoot = names.length >= 2 ? `\\\\${names[0]}\\${names[1]}\\` : normalizedPath
+    const segments: PathSegment[] = [{ label: shareRoot, path: shareRoot }]
+    let path = shareRoot
+
+    for (const name of names.slice(2)) {
+      path = path.endsWith('\\') ? `${path}${name}` : `${path}\\${name}`
+      segments.push({ label: name, path })
+    }
+
+    return segments
+  }
+
+  return normalizedPath.split('\\').filter(Boolean).map((name, index, names) => ({
+    label: name,
+    path: names.slice(0, index + 1).join('\\')
+  }))
 }
 
 const loadFileIcons = (directoryEntries: FileManagerEntry[]): void => {
@@ -195,6 +273,29 @@ const goUp = async (): Promise<void> => {
   if (parentPath.value) {
     await loadDirectory(parentPath.value)
   }
+}
+
+const startPathEditing = async (): Promise<void> => {
+  editablePath.value = currentPath.value
+  isEditingPath.value = true
+  await nextTick()
+  pathInput.value?.focus()
+  pathInput.value?.select()
+}
+
+const stopPathEditing = (): void => {
+  isEditingPath.value = false
+}
+
+const submitPathEditing = async (): Promise<void> => {
+  const targetPath = editablePath.value.trim()
+  isEditingPath.value = false
+
+  if (!targetPath || targetPath === currentPath.value) {
+    return
+  }
+
+  await loadDirectory(targetPath)
 }
 
 const setSort = (key: SortKey): void => {
@@ -302,7 +403,34 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="path-bar" :title="currentPath">{{ currentPath }}</div>
+      <div class="path-bar" :title="currentPath">
+        <input
+          v-if="isEditingPath"
+          ref="pathInput"
+          v-model="editablePath"
+          class="path-input"
+          type="text"
+          spellcheck="false"
+          @keydown.enter.prevent="submitPathEditing"
+          @keydown.escape.prevent="stopPathEditing"
+          @blur="stopPathEditing"
+        />
+        <div v-else class="path-breadcrumbs">
+          <template v-for="(segment, index) in pathSegments" :key="segment.path">
+            <button class="path-segment" type="button" @click="loadDirectory(segment.path)">
+              {{ segment.label }}
+            </button>
+            <span v-if="index < pathSegments.length - 1" class="path-separator">/</span>
+          </template>
+          <button
+            class="path-empty-space"
+            type="button"
+            aria-label="Edit path"
+            title="Edit path"
+            @click="startPathEditing"
+          ></button>
+        </div>
+      </div>
     </header>
 
     <section class="status-line" aria-live="polite">
