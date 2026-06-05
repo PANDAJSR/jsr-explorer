@@ -76,17 +76,24 @@ onMounted(async () => {
   await nextTick()
   fit()
 
-  props.tab.terminalId = props.tab.id
-  const session = await window.electron.terminal.create({
-    id: props.tab.id,
-    cwd: props.tab.cwd,
-    cols: terminal.cols,
-    rows: terminal.rows
-  })
-  props.tab.terminalId = session.id
-  props.tab.cwd = session.cwd
-  props.tab.title = getPathLabel(session.cwd) || session.shellName || 'Terminal'
-  terminal.focus()
+  try {
+    props.tab.terminalId = props.tab.id
+    const session = await window.electron.terminal.create({
+      id: props.tab.id,
+      cwd: props.tab.cwd,
+      cols: terminal.cols,
+      rows: terminal.rows
+    })
+    props.tab.terminalId = session.id
+    props.tab.cwd = session.cwd
+    props.tab.title = getPathLabel(session.cwd) || session.shellName || 'Terminal'
+    terminal.focus()
+  } catch (error) {
+    props.tab.terminalId = null
+    const message = error instanceof Error ? error.message : '无法启动终端。'
+    props.tab.exitMessage = message
+    terminal.writeln(`无法启动终端：${message}`)
+  }
 })
 
 watch(

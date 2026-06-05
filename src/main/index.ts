@@ -1,12 +1,15 @@
 import { constants, watch, type FSWatcher } from 'node:fs'
-import { access, copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
-import { basename, dirname, extname, join, parse } from 'node:path'
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat } from 'node:fs/promises'
+import { basename, dirname, extname, join, parse, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 import { inflateRawSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell, type WebContents } from 'electron'
 import * as pty from 'node-pty'
+
+const require = createRequire(import.meta.url)
 
 type FileManagerEntry = {
   name: string
@@ -215,6 +218,27 @@ const resolveTerminalCwd = async (cwd: string): Promise<string> => {
   }
 
   return homedir()
+}
+
+const ensurePtySpawnHelperExecutable = async (): Promise<void> => {
+  if (process.platform === 'win32') {
+    return
+  }
+
+  try {
+    const nodePtyIndexPath = require.resolve('node-pty')
+    const helperPath = resolve(
+      dirname(nodePtyIndexPath),
+      '..',
+      'prebuilds',
+      `${process.platform}-${process.arch}`,
+      'spawn-helper'
+    )
+
+    await chmod(helperPath, 0o755)
+  } catch {
+    // node-pty will surface a concrete spawn error if the helper is unavailable.
+  }
 }
 
 const notifyDirectoryChanged = (state: DirectoryWatcherState, directoryPath: string): void => {
@@ -1106,6 +1130,7 @@ const registerTerminalHandlers = (): void => {
     const cwd = await resolveTerminalCwd(options.cwd)
     const shellConfig = await getTerminalShell()
     const terminalId = options.id && !terminalSessions.has(options.id) ? options.id : `terminal-${nextTerminalId++}`
+    await ensurePtySpawnHelperExecutable()
     const terminalProcess = pty.spawn(shellConfig.command, shellConfig.args, {
       cols: Math.max(20, Math.trunc(options.cols) || 80),
       rows: Math.max(5, Math.trunc(options.rows) || 24),
