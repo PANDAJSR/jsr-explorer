@@ -16,7 +16,9 @@ type KeyboardActions = {
   openSelected: () => void
   paste: () => void
   rename: () => void
+  showFavoritesManager: () => void
   splitPane: (direction: SplitDirection) => void
+  jumpToFavorite: (index: number) => void
   trash: () => void
 }
 
@@ -50,6 +52,22 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
       if (direction) {
         event.preventDefault()
         actions.moveFocus(direction)
+        return
+      }
+    }
+
+    if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'f' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.showFavoritesManager()
+      return
+    }
+
+    if (event.shiftKey && event.code.startsWith('Digit') && !isTextEditingEvent(event)) {
+      const digit = Number(event.code.replace('Digit', ''))
+
+      if (digit >= 1 && digit <= 9) {
+        event.preventDefault()
+        actions.jumpToFavorite(digit - 1)
         return
       }
     }

@@ -1,5 +1,6 @@
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, type PropType } from 'vue'
 import ContextMenu from '../components/ContextMenu.vue'
+import FavoritesManager from '../components/FavoritesManager.vue'
 import FilePane from '../components/FilePane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import {
@@ -13,16 +14,52 @@ import {
   trashSelection
 } from '../file-manager/fileActions'
 import { getDirectionalPaneId } from '../file-manager/focusNavigation'
+import { getPathLabel } from '../file-manager/formatters'
 import { createKeyboardHandler } from '../file-manager/keyboard'
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
-import type { ColumnKey, FileTabState, MoveDirection, PaneState, Platform, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
+import type { ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
+
+const favoriteStorageKey = 'jsr-explorer.favorite-paths'
+
+const readFavoritePaths = (): FavoritePath[] => {
+  try {
+    const payload = JSON.parse(window.localStorage.getItem(favoriteStorageKey) ?? '[]') as FavoritePath[]
+
+    if (!Array.isArray(payload)) {
+      return []
+    }
+
+    return payload.filter(
+      (favorite): favorite is FavoritePath =>
+        typeof favorite?.id === 'string' &&
+        typeof favorite.path === 'string' &&
+        favorite.path.length > 0 &&
+        typeof favorite.title === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+const writeFavoritePaths = (favorites: FavoritePath[]): void => {
+  window.localStorage.setItem(favoriteStorageKey, JSON.stringify(favorites))
+}
+
+const createFavoritePath = (path: string): FavoritePath => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  path,
+  title: getPathLabel(path)
+})
+
 export const useFileManager = () => {
 const panes = reactive<Record<string, PaneState>>({})
 const platform = ref<Platform>('darwin')
 const focusedPaneId = ref('')
 const secondaryPaneId = ref<string | null>(null)
+const favorites = ref<FavoritePath[]>([])
+const isFavoritesManagerOpen = ref(false)
 const iconCache = reactive<Record<string, string>>({})
 const columns = reactive<Record<ColumnKey, number>>({
   name: 520,
@@ -351,6 +388,57 @@ const runOnFocusedTab = (action: (tab: FileTabState) => void | Promise<void>): v
     void action(focusedTab.value)
   }
 }
+const persistFavorites = (): void => {
+  writeFavoritePaths(favorites.value)
+}
+const addCurrentPathToFavorites = (): void => {
+  const path = focusedTab.value?.currentPath
+
+  if (!path || favorites.value.some((favorite) => favorite.path === path)) {
+    return
+  }
+
+  favorites.value = [...favorites.value, createFavoritePath(path)]
+  persistFavorites()
+}
+const removeFavoritePath = (favoriteId: string): void => {
+  favorites.value = favorites.value.filter((favorite) => favorite.id !== favoriteId)
+  persistFavorites()
+}
+const reorderFavoritePaths = (sourceIndex: number, targetIndex: number): void => {
+  if (
+    sourceIndex < 0 ||
+    targetIndex < 0 ||
+    sourceIndex >= favorites.value.length ||
+    targetIndex >= favorites.value.length ||
+    sourceIndex === targetIndex
+  ) {
+    return
+  }
+
+  const nextFavorites = [...favorites.value]
+  const [favorite] = nextFavorites.splice(sourceIndex, 1)
+  nextFavorites.splice(targetIndex, 0, favorite)
+  favorites.value = nextFavorites
+  persistFavorites()
+}
+const jumpToFavorite = async (favorite: FavoritePath): Promise<void> => {
+  const tab = focusedTab.value
+
+  if (!tab) {
+    return
+  }
+
+  isFavoritesManagerOpen.value = false
+  await loadDirectory(tab, favorite.path)
+}
+const jumpToFavoriteIndex = (index: number): void => {
+  const favorite = favorites.value[index]
+
+  if (favorite) {
+    void jumpToFavorite(favorite)
+  }
+}
 const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
   event.preventDefault()
   const hasSelection = tab.selectedPaths.length > 0
@@ -372,7 +460,7 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
     ]
   }
 }
-const handleKeydown = createKeyboardHandler(platform, {
+const handleFileManagerKeydown = createKeyboardHandler(platform, {
   closeTab: closeFocusedTab,
   copy: () => runOnFocusedTab(copySelectionToClipboard),
   copySelectedToSecondary: () => void copySelectedFileToSecondaryPane(),
@@ -387,9 +475,41 @@ const handleKeydown = createKeyboardHandler(platform, {
   openSelected: () => void openSelected(),
   paste: () => runOnFocusedTab((tab) => pasteClipboardIntoTab(tab, loadDirectory)),
   rename: () => runOnFocusedTab((tab) => renameActiveItem(tab, loadDirectory, requestName)),
+  showFavoritesManager: () => {
+    isFavoritesManagerOpen.value = true
+  },
   splitPane: splitFocusedPane,
+  jumpToFavorite: jumpToFavoriteIndex,
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
+const handleKeydown = (event: KeyboardEvent): void => {
+  if (!isFavoritesManagerOpen.value) {
+    handleFileManagerKeydown(event)
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    isFavoritesManagerOpen.value = false
+    return
+  }
+
+  if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'f') {
+    event.preventDefault()
+    isFavoritesManagerOpen.value = false
+    return
+  }
+
+  if (event.shiftKey && event.code.startsWith('Digit')) {
+    const digit = Number(event.code.replace('Digit', ''))
+
+    if (digit >= 1 && digit <= 9) {
+      event.preventDefault()
+      jumpToFavoriteIndex(digit - 1)
+      return
+    }
+  }
+}
 const SplitNodeView = defineComponent({
   name: 'SplitNodeView',
   props: {
@@ -441,6 +561,7 @@ const SplitNodeView = defineComponent({
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousedown', hideContextMenu)
+  favorites.value = readFavoritePaths()
   platform.value = await window.electron.fileManager.getPlatform()
   const homeDirectory = await window.electron.fileManager.getHomeDirectory()
   const tab = focusedTab.value
@@ -458,8 +579,16 @@ return {
   ContextMenu,
   contextMenu,
   cancelNameDialog: () => closeNameDialog(null),
+  addCurrentPathToFavorites,
+  FavoritesManager,
+  favorites,
+  focusedTab,
+  isFavoritesManagerOpen,
+  jumpToFavorite: (favorite: FavoritePath) => void jumpToFavorite(favorite),
   NameDialog,
   nameDialog,
+  removeFavoritePath,
+  reorderFavoritePaths,
   rootNode,
   submitNameDialog: (value: string) => closeNameDialog(value),
   SplitNodeView

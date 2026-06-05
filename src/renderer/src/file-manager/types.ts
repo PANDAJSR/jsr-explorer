@@ -6,6 +6,12 @@ export type MoveDirection = 'left' | 'right' | 'up' | 'down'
 export type Platform = 'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'
 export type FocusState = 'primary' | 'secondary' | 'none'
 
+export type FavoritePath = {
+  id: string
+  path: string
+  title: string
+}
+
 export type PathSegment = {
   label: string
   path: string
