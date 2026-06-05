@@ -3,6 +3,7 @@ import ContextMenu from '../components/ContextMenu.vue'
 import FavoritesManager from '../components/FavoritesManager.vue'
 import FilePane from '../components/FilePane.vue'
 import NameDialog from '../components/NameDialog.vue'
+import QuickPreview from '../components/QuickPreview.vue'
 import {
   copySelectionToClipboard,
   copySelectionToSecondary,
@@ -19,7 +20,7 @@ import { createKeyboardHandler } from '../file-manager/keyboard'
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
-import type { ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
+import type { ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
 
@@ -60,6 +61,7 @@ const focusedPaneId = ref('')
 const secondaryPaneId = ref<string | null>(null)
 const favorites = ref<FavoritePath[]>([])
 const isFavoritesManagerOpen = ref(false)
+const quickPreview = ref<QuickPreviewState | null>(null)
 const iconCache = reactive<Record<string, string>>({})
 const columns = reactive<Record<ColumnKey, number>>({
   name: 520,
@@ -186,6 +188,30 @@ const openSelected = async (): Promise<void> => {
   if (tab && entry) {
     await openEntry(tab, entry)
   }
+}
+const previewSelected = async (): Promise<void> => {
+  const tab = focusedTab.value
+  const entry = tab?.entries.find((item) => item.path === tab.activePath)
+
+  if (!tab || !entry || entry.type !== 'file') {
+    return
+  }
+
+  tab.errorMessage = ''
+
+  try {
+    const preview = await window.electron.fileManager.getQuickPreview(entry.path)
+    quickPreview.value = {
+      entryName: entry.name,
+      kind: preview.kind,
+      sourceUrl: preview.sourceUrl
+    }
+  } catch (error) {
+    tab.errorMessage = error instanceof Error ? error.message : '无法预览对象。'
+  }
+}
+const closeQuickPreview = (): void => {
+  quickPreview.value = null
 }
 const scrollActiveRowIntoView = (paneId: string): void => {
   window.requestAnimationFrame(() => {
@@ -474,6 +500,7 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   newFolder: () => runOnFocusedTab((tab) => createFolder(tab, loadDirectory, requestName)),
   openSelected: () => void openSelected(),
   paste: () => runOnFocusedTab((tab) => pasteClipboardIntoTab(tab, loadDirectory)),
+  previewSelected: () => void previewSelected(),
   rename: () => runOnFocusedTab((tab) => renameActiveItem(tab, loadDirectory, requestName)),
   showFavoritesManager: () => {
     isFavoritesManagerOpen.value = true
@@ -483,6 +510,15 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
 const handleKeydown = (event: KeyboardEvent): void => {
+  if (quickPreview.value) {
+    if (event.key === 'Escape' || event.code === 'Space') {
+      event.preventDefault()
+      closeQuickPreview()
+    }
+
+    return
+  }
+
   if (!isFavoritesManagerOpen.value) {
     handleFileManagerKeydown(event)
     return
@@ -579,6 +615,7 @@ return {
   ContextMenu,
   contextMenu,
   cancelNameDialog: () => closeNameDialog(null),
+  closeQuickPreview,
   addCurrentPathToFavorites,
   FavoritesManager,
   favorites,
@@ -587,6 +624,8 @@ return {
   jumpToFavorite: (favorite: FavoritePath) => void jumpToFavorite(favorite),
   NameDialog,
   nameDialog,
+  QuickPreview,
+  quickPreview,
   removeFavoritePath,
   reorderFavoritePaths,
   rootNode,

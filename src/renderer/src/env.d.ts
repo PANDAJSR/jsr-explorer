@@ -24,6 +24,11 @@ type OpenPathResult =
       path: string
     }
 
+type QuickPreviewPayload = {
+  kind: 'image' | 'video' | 'audio'
+  sourceUrl: string
+}
+
 interface Window {
   electron: {
     fileManager: {
@@ -32,6 +37,7 @@ interface Window {
       openPath: (targetPath: string) => Promise<OpenPathResult>
       getParentDirectory: (directoryPath: string) => Promise<string | null>
       getFileIcon: (targetPath: string) => Promise<string>
+      getQuickPreview: (targetPath: string) => Promise<QuickPreviewPayload>
       copyPathsToDirectory: (sourcePaths: string[], destinationDirectory: string) => Promise<string[]>
       movePathsToDirectory: (sourcePaths: string[], destinationDirectory: string) => Promise<string[]>
       renamePath: (sourcePath: string, newName: string) => Promise<string>

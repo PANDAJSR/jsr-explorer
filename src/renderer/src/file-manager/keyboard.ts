@@ -15,6 +15,7 @@ type KeyboardActions = {
   moveSelection: (direction: 'previous' | 'next', extendSelection: boolean) => void
   openSelected: () => void
   paste: () => void
+  previewSelected: () => void
   rename: () => void
   showFavoritesManager: () => void
   splitPane: (direction: SplitDirection) => void
@@ -87,6 +88,12 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
     if (event.shiftKey && event.key === 'Backspace' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.trash()
+      return
+    }
+
+    if (!event.altKey && !event.shiftKey && !primaryModifier && event.code === 'Space' && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.previewSelected()
       return
     }
 

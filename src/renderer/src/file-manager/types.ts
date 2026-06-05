@@ -5,6 +5,13 @@ export type SplitDirection = 'horizontal' | 'vertical'
 export type MoveDirection = 'left' | 'right' | 'up' | 'down'
 export type Platform = 'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'
 export type FocusState = 'primary' | 'secondary' | 'none'
+export type QuickPreviewKind = 'image' | 'video' | 'audio'
+
+export type QuickPreviewState = {
+  entryName: string
+  kind: QuickPreviewKind
+  sourceUrl: string
+}
 
 export type FavoritePath = {
   id: string

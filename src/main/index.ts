@@ -2,7 +2,8 @@ import { constants } from 'node:fs'
 import { copyFile, cp, mkdir, readdir, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse } from 'node:path'
 import { homedir } from 'node:os'
-import { app, BrowserWindow, clipboard, ipcMain, nativeImage, shell } from 'electron'
+import { pathToFileURL } from 'node:url'
+import { app, BrowserWindow, clipboard, ipcMain, nativeImage, net, protocol, shell } from 'electron'
 
 type FileManagerEntry = {
   name: string
@@ -19,6 +20,13 @@ type DirectoryPayload = {
 }
 
 type ClipboardMode = 'copy' | 'cut'
+
+type QuickPreviewKind = 'image' | 'video' | 'audio'
+
+type QuickPreviewPayload = {
+  kind: QuickPreviewKind
+  sourceUrl: string
+}
 
 let internalClipboard: {
   mode: ClipboardMode
@@ -56,6 +64,50 @@ const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: st
 const fallbackDragIcon = nativeImage.createFromDataURL(
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lkR6WQAAAABJRU5ErkJggg=='
 )
+
+const previewScheme = 'jsr-file-preview'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: previewScheme,
+    privileges: {
+      secure: true,
+      standard: true,
+      stream: true,
+      supportFetchAPI: true
+    }
+  }
+])
+
+const previewExtensions: Record<QuickPreviewKind, Set<string>> = {
+  image: new Set(['.apng', '.avif', '.bmp', '.gif', '.ico', '.jpg', '.jpeg', '.png', '.svg', '.webp']),
+  video: new Set(['.m4v', '.mov', '.mp4', '.ogg', '.ogv', '.webm']),
+  audio: new Set(['.aac', '.flac', '.m4a', '.mp3', '.oga', '.ogg', '.opus', '.wav', '.webm'])
+}
+
+const getPreviewKind = (targetPath: string): QuickPreviewKind | null => {
+  const extension = extname(targetPath).toLowerCase()
+
+  for (const [kind, extensions] of Object.entries(previewExtensions) as Array<[QuickPreviewKind, Set<string>]>) {
+    if (extensions.has(extension)) {
+      return kind
+    }
+  }
+
+  return null
+}
+
+const createPreviewUrl = (targetPath: string): string =>
+  `${previewScheme}://file/${encodeURIComponent(targetPath)}`
+
+const decodePreviewPath = (requestUrl: string): string | null => {
+  try {
+    const url = new URL(requestUrl)
+    return decodeURIComponent(url.pathname.slice(1))
+  } catch {
+    return null
+  }
+}
 
 const escapeXml = (value: string): string =>
   value
@@ -241,6 +293,25 @@ const registerFileManagerHandlers = (): void => {
     return icon.toDataURL()
   })
 
+  ipcMain.handle('file-manager:get-quick-preview', async (_, targetPath: string): Promise<QuickPreviewPayload> => {
+    const targetStats = await stat(targetPath)
+
+    if (!targetStats.isFile()) {
+      throw new Error('只能预览文件。')
+    }
+
+    const kind = getPreviewKind(targetPath)
+
+    if (!kind) {
+      throw new Error('暂不支持预览该文件格式。')
+    }
+
+    return {
+      kind,
+      sourceUrl: createPreviewUrl(targetPath)
+    }
+  })
+
   ipcMain.handle('file-manager:copy-paths-to-directory', async (_, sourcePaths: string[], destinationDirectory: string) => {
     const copiedPaths: string[] = []
 
@@ -329,6 +400,24 @@ const registerFileManagerHandlers = (): void => {
   ipcMain.handle('file-manager:get-platform', () => process.platform)
 }
 
+const registerPreviewProtocol = (): void => {
+  protocol.handle(previewScheme, async (request) => {
+    const targetPath = decodePreviewPath(request.url)
+
+    if (!targetPath) {
+      return new Response(null, { status: 400 })
+    }
+
+    const targetStats = await stat(targetPath)
+
+    if (!targetStats.isFile() || !getPreviewKind(targetPath)) {
+      return new Response(null, { status: 404 })
+    }
+
+    return net.fetch(pathToFileURL(targetPath).toString())
+  })
+}
+
 const createWindow = (): void => {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -359,6 +448,7 @@ const createWindow = (): void => {
 }
 
 app.whenReady().then(() => {
+  registerPreviewProtocol()
   registerFileManagerHandlers()
   createWindow()
 

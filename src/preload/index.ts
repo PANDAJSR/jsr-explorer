@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electron', {
     getParentDirectory: (directoryPath: string) =>
       ipcRenderer.invoke('file-manager:get-parent-directory', directoryPath),
     getFileIcon: (targetPath: string) => ipcRenderer.invoke('file-manager:get-file-icon', targetPath),
+    getQuickPreview: (targetPath: string) => ipcRenderer.invoke('file-manager:get-quick-preview', targetPath),
     copyPathsToDirectory: (sourcePaths: string[], destinationDirectory: string) =>
       ipcRenderer.invoke('file-manager:copy-paths-to-directory', sourcePaths, destinationDirectory),
     movePathsToDirectory: (sourcePaths: string[], destinationDirectory: string) =>

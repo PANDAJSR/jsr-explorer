@@ -4,6 +4,7 @@ import { useFileManager } from './composables/useFileManager'
 const {
   addCurrentPathToFavorites,
   cancelNameDialog,
+  closeQuickPreview,
   ContextMenu,
   contextMenu,
   FavoritesManager,
@@ -13,6 +14,8 @@ const {
   jumpToFavorite,
   NameDialog,
   nameDialog,
+  QuickPreview,
+  quickPreview,
   removeFavoritePath,
   reorderFavoritePaths,
   rootNode,
@@ -42,5 +45,6 @@ const {
       @cancel="cancelNameDialog"
       @submit="submitNameDialog"
     />
+    <QuickPreview v-if="quickPreview" :preview="quickPreview" @close="closeQuickPreview" />
   </main>
 </template>
