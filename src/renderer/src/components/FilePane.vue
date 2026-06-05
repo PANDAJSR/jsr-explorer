@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
+import { filePathDragMimeType, hasDraggedFilePaths, readDraggedFilePaths } from '../file-manager/dragPayload'
 import { formatModifiedAt, formatSize, getPathLabel } from '../file-manager/formatters'
 import { getPathSegments } from '../file-manager/pathSegments'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
@@ -142,7 +143,7 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
 
   const draggedPaths = getDraggedPaths(entry)
 
-  event.dataTransfer?.setData(dragMimeType, JSON.stringify(draggedPaths))
+  event.dataTransfer?.setData(filePathDragMimeType, JSON.stringify(draggedPaths))
   event.dataTransfer?.setData('text/plain', draggedPaths.join('\n'))
   event.dataTransfer?.setData(
     'text/uri-list',
@@ -156,28 +157,14 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
   window.electron.fileManager.startNativeDrag(draggedPaths)
 }
 
-const getDroppedPaths = (event: DragEvent): string[] => {
-  const internalPayload = event.dataTransfer?.getData(dragMimeType)
-
-  if (internalPayload) {
-    try {
-      return JSON.parse(internalPayload) as string[]
-    } catch {
-      return []
-    }
-  }
-
-  return [...(event.dataTransfer?.files ?? [])]
-    .map((file) => window.electron.fileManager.getPathForFile(file))
-    .filter(Boolean)
-}
+const getDroppedPaths = (event: DragEvent): string[] => readDraggedFilePaths(event)
 
 const handlePaneDragOver = (event: DragEvent): void => {
   if (!event.dataTransfer) {
     return
   }
 
-  if (event.dataTransfer.types.includes(dragMimeType) || event.dataTransfer.types.includes('Files')) {
+  if (hasDraggedFilePaths(event)) {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }

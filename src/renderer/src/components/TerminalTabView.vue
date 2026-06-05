@@ -2,6 +2,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { hasDraggedFilePaths, readDraggedFilePaths } from '../file-manager/dragPayload'
 import { getPathLabel } from '../file-manager/formatters'
 import type { Platform, SplitDirection, TerminalTabState } from '../file-manager/types'
 
@@ -76,6 +77,30 @@ const handleTerminalKey = (event: KeyboardEvent): boolean => {
   event.preventDefault()
   event.stopPropagation()
   return false
+}
+
+const escapeShellPath = (path: string): string => `'${path.replaceAll("'", "'\\''")}'`
+
+const handleTerminalDragOver = (event: DragEvent): void => {
+  if (!event.dataTransfer || !hasDraggedFilePaths(event)) {
+    return
+  }
+
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+}
+
+const handleTerminalDrop = (event: DragEvent): void => {
+  const paths = readDraggedFilePaths(event)
+
+  if (paths.length === 0 || !props.tab.terminalId) {
+    return
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+  window.electron.terminal.write(props.tab.terminalId, paths.map(escapeShellPath).join(' '))
+  terminal?.focus()
 }
 
 onMounted(async () => {
@@ -172,5 +197,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="terminal-instance" :data-terminal-tab-id="tab.id" tabindex="-1"></div>
+  <div
+    ref="container"
+    class="terminal-instance"
+    :data-terminal-tab-id="tab.id"
+    tabindex="-1"
+    @dragover.capture="handleTerminalDragOver"
+    @drop.capture="handleTerminalDrop"
+  ></div>
 </template>
