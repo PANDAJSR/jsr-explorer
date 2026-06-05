@@ -91,6 +91,12 @@ const selectSingleEntry = (entry: FileManagerEntry): void => {
   props.tab.selectionAnchorPath = entry.path
 }
 
+const clearSelection = (): void => {
+  props.tab.selectedPaths = []
+  props.tab.activePath = null
+  props.tab.selectionAnchorPath = null
+}
+
 const selectEntry = (event: MouseEvent, entry: FileManagerEntry): void => {
   const primaryModifier = props.platform === 'darwin' ? event.metaKey : event.ctrlKey
 
@@ -306,13 +312,23 @@ const submitPathEditing = (): void => {
       </div>
     </header>
 
-    <section class="status-line" aria-live="polite">
+    <section
+      class="status-line"
+      aria-live="polite"
+      @click="clearSelection"
+      @contextmenu="emit('showContextMenu', tab, $event, false)"
+    >
       <span v-if="tab.isLoading">加载中...</span>
       <span v-else-if="tab.errorMessage" class="error-text">{{ tab.errorMessage }}</span>
       <span v-else>{{ sortedEntries.length }} 个对象</span>
     </section>
 
-    <section class="file-list" aria-label="文件" @contextmenu="emit('showContextMenu', tab, $event, false)">
+    <section
+      class="file-list"
+      aria-label="文件"
+      @click.self="clearSelection"
+      @contextmenu="emit('showContextMenu', tab, $event, false)"
+    >
       <div class="file-header file-grid" :style="columnStyle">
         <button class="header-cell name-header" type="button" @click="emit('setSort', tab, 'name')">
           <span>名称</span>
