@@ -56,7 +56,7 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
       }
     }
 
-    if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'f' && !isTextEditingEvent(event)) {
+    if (event.altKey && event.shiftKey && event.code === 'KeyF' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.showFavoritesManager()
       return

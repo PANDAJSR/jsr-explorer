@@ -494,7 +494,7 @@ const handleKeydown = (event: KeyboardEvent): void => {
     return
   }
 
-  if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'f') {
+  if (event.altKey && event.shiftKey && event.code === 'KeyF') {
     event.preventDefault()
     isFavoritesManagerOpen.value = false
     return
