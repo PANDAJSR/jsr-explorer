@@ -23,6 +23,7 @@ type KeyboardActions = {
   showFavoritesManager: () => void
   showShortcutHelp: () => void
   splitPane: (direction: SplitDirection, kind: 'files' | 'terminal') => void
+  startQuickFilter: (initialQuery: string) => void
   jumpToFavorite: (index: number) => void
   trash: () => void
 }
@@ -128,6 +129,12 @@ export const createKeyboardHandler = (platform: Ref<Platform>, actions: Keyboard
     if (!event.altKey && !event.shiftKey && !primaryModifier && event.code === 'Space' && !isTextEditingEvent(event)) {
       event.preventDefault()
       actions.previewSelected()
+      return
+    }
+
+    if (!event.altKey && !primaryModifier && event.key.length === 1 && !isTextEditingEvent(event)) {
+      event.preventDefault()
+      actions.startQuickFilter(event.key)
       return
     }
 

@@ -78,6 +78,9 @@ export type FileTabState = {
   sortDirection: SortDirection
   isEditingPath: boolean
   editablePath: string
+  isQuickFilterOpen: boolean
+  quickFilterQuery: string
+  quickFilterActivePath: string | null
   loadSequence: number
 }
 

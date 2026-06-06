@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { filePathDragMimeType, hasDraggedFilePaths, readDraggedFilePaths } from '../file-manager/dragPayload'
 import { formatModifiedAt, formatSize, getPathLabel } from '../file-manager/formatters'
 import { getPathSegments } from '../file-manager/pathSegments'
@@ -31,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const pathInput = ref<HTMLInputElement | null>(null)
+const quickFilterInput = ref<HTMLInputElement | null>(null)
 
 const columnStyle = computed(() => ({
   gridTemplateColumns: `${props.columns.name}px ${props.columns.modifiedAt}px ${props.columns.size}px`
@@ -43,6 +44,20 @@ const pathSeparator = computed(() => (props.platform === 'win32' ? '\\' : '/'))
 
 const pathSegments = computed(() => getPathSegments(props.tab.currentPath, props.platform))
 const sortedEntries = computed(() => sortEntriesForTab(props.tab))
+const quickFilterResults = computed(() => {
+  const query = props.tab.quickFilterQuery.trim().toLocaleLowerCase()
+
+  if (!query) {
+    return []
+  }
+
+  return sortedEntries.value.filter((entry) => entry.name.toLocaleLowerCase().includes(query))
+})
+const quickFilterActiveIndex = computed(() =>
+  props.tab.quickFilterActivePath
+    ? quickFilterResults.value.findIndex((entry) => entry.path === props.tab.quickFilterActivePath)
+    : -1
+)
 
 const sortIndicator = (key: SortKey): string => {
   if (props.tab.sortKey !== key) {
@@ -96,6 +111,70 @@ const clearSelection = (): void => {
   props.tab.selectedPaths = []
   props.tab.activePath = null
   props.tab.selectionAnchorPath = null
+}
+
+const closeQuickFilter = (): void => {
+  props.tab.isQuickFilterOpen = false
+  props.tab.quickFilterQuery = ''
+  props.tab.quickFilterActivePath = null
+}
+
+const scrollActiveEntryIntoView = (): void => {
+  nextTick(() => {
+    document.querySelector<HTMLElement>(`[data-pane-id="${props.pane.id}"] .file-row.active`)?.scrollIntoView({
+      block: 'nearest'
+    })
+  })
+}
+
+const selectQuickFilterEntry = (entry: FileManagerEntry): void => {
+  selectSingleEntry(entry)
+  closeQuickFilter()
+  scrollActiveEntryIntoView()
+}
+
+const moveQuickFilterSelection = (direction: 'previous' | 'next'): void => {
+  const results = quickFilterResults.value
+
+  if (results.length === 0) {
+    props.tab.quickFilterActivePath = null
+    return
+  }
+
+  const currentIndex = quickFilterActiveIndex.value === -1 ? 0 : quickFilterActiveIndex.value
+  const nextIndex =
+    direction === 'next'
+      ? Math.min(results.length - 1, currentIndex + 1)
+      : Math.max(0, currentIndex - 1)
+
+  props.tab.quickFilterActivePath = results[nextIndex].path
+}
+
+const selectActiveQuickFilterEntry = (): void => {
+  const entry = quickFilterResults.value[quickFilterActiveIndex.value] ?? quickFilterResults.value[0]
+
+  if (entry) {
+    selectQuickFilterEntry(entry)
+  }
+}
+
+const handleQuickFilterKeydown = (event: KeyboardEvent): void => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    moveQuickFilterSelection(event.key === 'ArrowDown' ? 'next' : 'previous')
+    return
+  }
+
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    selectActiveQuickFilterEntry()
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeQuickFilter()
+  }
 }
 
 const selectEntry = (event: MouseEvent, entry: FileManagerEntry): void => {
@@ -203,6 +282,38 @@ const submitPathEditing = (): void => {
 
   emit('navigate', props.tab, targetPath)
 }
+
+watch(
+  () => props.tab.isQuickFilterOpen,
+  async (isOpen) => {
+    if (!isOpen) {
+      return
+    }
+
+    await nextTick()
+    quickFilterInput.value?.focus()
+    quickFilterInput.value?.setSelectionRange(props.tab.quickFilterQuery.length, props.tab.quickFilterQuery.length)
+  }
+)
+
+watch(
+  [quickFilterResults, () => props.tab.quickFilterQuery, () => props.tab.isQuickFilterOpen],
+  ([results]) => {
+    if (!props.tab.isQuickFilterOpen) {
+      return
+    }
+
+    if (results.length === 0) {
+      props.tab.quickFilterActivePath = null
+      return
+    }
+
+    if (!results.some((entry) => entry.path === props.tab.quickFilterActivePath)) {
+      props.tab.quickFilterActivePath = results[0].path
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -369,5 +480,35 @@ const submitPathEditing = (): void => {
         </button>
       </div>
     </section>
+
+    <div v-if="tab.isQuickFilterOpen" class="quick-filter" @mousedown.stop>
+      <div class="quick-filter-results" role="listbox" aria-label="过滤结果">
+        <button
+          v-for="entry in quickFilterResults"
+          :key="entry.path"
+          class="quick-filter-result"
+          :class="{ active: tab.quickFilterActivePath === entry.path }"
+          type="button"
+          role="option"
+          :aria-selected="tab.quickFilterActivePath === entry.path"
+          :title="entry.path"
+          @click="selectQuickFilterEntry(entry)"
+          @mouseenter="tab.quickFilterActivePath = entry.path"
+        >
+          <span class="quick-filter-kind">{{ entry.type === 'directory' ? '文件夹' : '文件' }}</span>
+          <span class="quick-filter-name">{{ entry.name }}</span>
+        </button>
+        <div v-if="quickFilterResults.length === 0" class="quick-filter-empty">没有匹配项</div>
+      </div>
+      <input
+        ref="quickFilterInput"
+        v-model="tab.quickFilterQuery"
+        class="quick-filter-input"
+        type="text"
+        spellcheck="false"
+        aria-label="过滤当前文件列表"
+        @keydown="handleQuickFilterKeydown"
+      />
+    </div>
   </section>
 </template>

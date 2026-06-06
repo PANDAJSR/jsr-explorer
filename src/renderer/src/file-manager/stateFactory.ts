@@ -41,6 +41,9 @@ export const createStateFactory = () => {
       sortDirection: 'asc',
       isEditingPath: false,
       editablePath: '',
+      isQuickFilterOpen: false,
+      quickFilterQuery: '',
+      quickFilterActivePath: null,
       loadSequence: 0
     }
   }

@@ -789,6 +789,7 @@ button {
 }
 
 .file-pane {
+  position: relative;
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -1203,4 +1204,93 @@ button {
   stroke: #7b8794;
   stroke-linejoin: round;
   stroke-width: 1.5;
+}
+
+.quick-filter {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  display: flex;
+  width: min(360px, calc(100% - 28px));
+  flex-direction: column;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #b9c7d6;
+  border-radius: 7px;
+  box-shadow: 0 14px 36px rgb(31 41 51 / 20%);
+}
+
+.quick-filter-results {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  overflow: auto;
+  border-bottom: 1px solid #d8dfe6;
+}
+
+.quick-filter-result {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #25313d;
+  background: #ffffff;
+  border: 0;
+  border-bottom: 1px solid #edf1f4;
+  cursor: default;
+  text-align: left;
+}
+
+.quick-filter-result:last-child {
+  border-bottom: 0;
+}
+
+.quick-filter-result:hover,
+.quick-filter-result.active {
+  color: #ffffff;
+  background: #1f6feb;
+}
+
+.quick-filter-kind {
+  color: #657384;
+  font-size: 12px;
+}
+
+.quick-filter-result:hover .quick-filter-kind,
+.quick-filter-result.active .quick-filter-kind {
+  color: #dbeafe;
+}
+
+.quick-filter-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-filter-empty {
+  min-height: 34px;
+  padding: 9px 10px;
+  color: #657384;
+  font-size: 13px;
+}
+
+.quick-filter-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  color: #25313d;
+  background: #ffffff;
+  border: 0;
+  outline: 2px solid transparent;
+  font: inherit;
+}
+
+.quick-filter-input:focus {
+  outline-color: #73a7f7;
+  outline-offset: -2px;
 }

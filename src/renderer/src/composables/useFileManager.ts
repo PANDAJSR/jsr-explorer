@@ -212,6 +212,9 @@ const applyDirectoryPayload = (
     tab.selectionAnchorPath && entryPaths.has(tab.selectionAnchorPath)
       ? tab.selectionAnchorPath
       : selectedPaths[0] ?? tab.activePath
+  tab.isQuickFilterOpen = false
+  tab.quickFilterQuery = ''
+  tab.quickFilterActivePath = null
   loadFileIcons(payload.entries)
 }
 const loadDirectory = async (tab: FileTabState, directoryPath: string, pushHistory = true): Promise<void> => {
@@ -469,6 +472,17 @@ const setSort = (tab: FileTabState, key: SortKey): void => {
   }
   tab.sortKey = key
   tab.sortDirection = 'asc'
+}
+const startQuickFilter = (initialQuery: string): void => {
+  const tab = focusedTab.value
+
+  if (!tab || initialQuery.trim().length === 0) {
+    return
+  }
+
+  tab.quickFilterQuery = initialQuery
+  tab.quickFilterActivePath = null
+  tab.isQuickFilterOpen = true
 }
 const startColumnResize = (event: MouseEvent, column: ColumnKey): void => {
   event.preventDefault()
@@ -824,6 +838,7 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
     isShortcutHelpOpen.value = true
   },
   splitPane: splitFocusedPane,
+  startQuickFilter,
   jumpToFavorite: jumpToFavoriteIndex,
   trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
 })
