@@ -1,4 +1,4 @@
-import { constants, watch, type FSWatcher } from 'node:fs'
+import { constants, existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, parse, resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -358,6 +358,27 @@ const createFallbackDragIcon = (): Electron.NativeImage => {
 }
 
 const fallbackDragIcon = createFallbackDragIcon()
+let fallbackDragIconPath: string | null = null
+
+const getFallbackDragIconPath = (): string | Electron.NativeImage => {
+  if (fallbackDragIconPath) {
+    return fallbackDragIconPath
+  }
+
+  try {
+    const iconPath = join(app.getPath('userData'), 'drag-icon.png')
+    mkdirSync(dirname(iconPath), { recursive: true })
+
+    if (!existsSync(iconPath)) {
+      writeFileSync(iconPath, fallbackDragIcon.toPNG())
+    }
+
+    fallbackDragIconPath = iconPath
+    return iconPath
+  } catch {
+    return fallbackDragIcon
+  }
+}
 
 const previewScheme = 'jsr-file-preview'
 const layoutFileName = 'file-manager-layout.json'
@@ -1148,23 +1169,16 @@ const registerFileManagerHandlers = (): void => {
     return pastedPaths
   })
 
-  ipcMain.on('file-manager:start-native-drag', (event, sourcePaths: string[], iconDataUrl?: string) => {
+  ipcMain.on('file-manager:start-native-drag', (event, sourcePaths: string[]) => {
     const validPaths = sourcePaths.filter(Boolean)
 
     if (validPaths.length === 0) {
       return
     }
 
-    const item = {
-      file: validPaths[0],
-      ...(validPaths.length > 1 ? { files: validPaths } : {})
-    }
-
-    const icon = iconDataUrl ? nativeImage.createFromDataURL(iconDataUrl) : fallbackDragIcon
-
     event.sender.startDrag({
-      ...item,
-      icon: icon.isEmpty() ? fallbackDragIcon : icon
+      file: validPaths[0],
+      icon: getFallbackDragIconPath()
     })
   })
 
