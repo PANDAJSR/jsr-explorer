@@ -16,6 +16,16 @@ export const createFilePathDragPayload = (
   sourceTabId
 })
 
+let activeFilePathDragPayload: FilePathDragPayload | null = null
+
+export const setActiveFilePathDragPayload = (payload: FilePathDragPayload): void => {
+  activeFilePathDragPayload = payload
+}
+
+export const clearActiveFilePathDragPayload = (): void => {
+  activeFilePathDragPayload = null
+}
+
 export const readFilePathDragPayload = (event: DragEvent): FilePathDragPayload => {
   const internalPayload = event.dataTransfer?.getData(filePathDragMimeType)
 
@@ -37,6 +47,10 @@ export const readFilePathDragPayload = (event: DragEvent): FilePathDragPayload =
     } catch {
       return { paths: [] }
     }
+  }
+
+  if (activeFilePathDragPayload) {
+    return activeFilePathDragPayload
   }
 
   const uriList = event.dataTransfer?.getData('text/uri-list')

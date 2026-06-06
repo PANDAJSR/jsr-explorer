@@ -2,10 +2,12 @@
 import { match } from 'pinyin-pro'
 import { computed, nextTick, ref, watch } from 'vue'
 import {
+  clearActiveFilePathDragPayload,
   createFilePathDragPayload,
   filePathDragMimeType,
   hasDraggedFilePaths,
-  readFilePathDragPayload
+  readFilePathDragPayload,
+  setActiveFilePathDragPayload
 } from '../file-manager/dragPayload'
 import { formatModifiedAt, formatSize, getPathLabel } from '../file-manager/formatters'
 import { getPathSegments } from '../file-manager/pathSegments'
@@ -246,6 +248,7 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
   const draggedPaths = getDraggedPaths(entry)
   const payload = createFilePathDragPayload(draggedPaths, props.pane.id, props.tab.id)
 
+  setActiveFilePathDragPayload(payload)
   event.dataTransfer?.setData(filePathDragMimeType, JSON.stringify(payload))
 
   if (event.dataTransfer) {
@@ -253,6 +256,10 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
   }
 
   window.electron.fileManager.startNativeDrag(draggedPaths)
+}
+
+const finishEntryDrag = (): void => {
+  clearActiveFilePathDragPayload()
 }
 
 const handlePaneDragOver = (event: DragEvent): void => {
@@ -485,6 +492,7 @@ watch(
           @contextmenu.stop.prevent="selectEntryForContextMenu($event, entry)"
           @dblclick="emit('openEntry', tab, entry)"
           @dragstart="startEntryDrag($event, entry)"
+          @dragend="finishEntryDrag"
         >
           <span class="file-cell name-cell">
             <span v-if="entry.type === 'directory'" class="folder-icon" aria-hidden="true">
