@@ -4,7 +4,6 @@ import { computed, nextTick, ref, watch } from 'vue'
 import {
   clearActiveFilePathDragPayload,
   createFilePathDragPayload,
-  filePathDragMimeType,
   hasDraggedFilePaths,
   readFilePathDragPayload,
   setActiveFilePathDragPayload
@@ -249,11 +248,7 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
   const payload = createFilePathDragPayload(draggedPaths, props.pane.id, props.tab.id)
 
   setActiveFilePathDragPayload(payload)
-  event.dataTransfer?.setData(filePathDragMimeType, JSON.stringify(payload))
-
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'copyMove'
-  }
+  event.preventDefault()
 
   window.electron.fileManager.startNativeDrag(draggedPaths, props.iconCache[entry.path])
 }
