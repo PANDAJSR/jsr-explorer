@@ -134,7 +134,7 @@ interface Window {
       trashPaths: (sourcePaths: string[]) => Promise<void>
       writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') => Promise<void>
       pasteClipboardPaths: (destinationDirectory: string) => Promise<string[]>
-      startNativeDrag: (sourcePaths: string[]) => void
+      startNativeDrag: (sourcePaths: string[], iconDataUrl?: string) => void
       getPathForFile: (file: File) => string
       getPlatform: () => Promise<'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd'>
       readLayout: () => Promise<unknown>

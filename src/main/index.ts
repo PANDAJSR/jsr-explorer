@@ -340,9 +340,24 @@ const getAvailableOutputPath = async (destinationDirectory: string, fileName: st
   throw new Error(`无法为 ${fileName} 找到可用名称`)
 }
 
-const fallbackDragIcon = nativeImage.createFromDataURL(
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lkR6WQAAAABJRU5ErkJggg=='
-)
+const createFallbackDragIcon = (): Electron.NativeImage => {
+  const size = 32
+  const bitmap = Buffer.alloc(size * size * 4)
+
+  for (let index = 0; index < bitmap.length; index += 4) {
+    bitmap[index] = 0x5a
+    bitmap[index + 1] = 0x8f
+    bitmap[index + 2] = 0xd8
+    bitmap[index + 3] = 0xff
+  }
+
+  return nativeImage.createFromBitmap(bitmap, {
+    width: size,
+    height: size
+  })
+}
+
+const fallbackDragIcon = createFallbackDragIcon()
 
 const previewScheme = 'jsr-file-preview'
 const layoutFileName = 'file-manager-layout.json'
@@ -1133,7 +1148,7 @@ const registerFileManagerHandlers = (): void => {
     return pastedPaths
   })
 
-  ipcMain.on('file-manager:start-native-drag', async (event, sourcePaths: string[]) => {
+  ipcMain.on('file-manager:start-native-drag', (event, sourcePaths: string[], iconDataUrl?: string) => {
     const validPaths = sourcePaths.filter(Boolean)
 
     if (validPaths.length === 0) {
@@ -1145,21 +1160,11 @@ const registerFileManagerHandlers = (): void => {
       ...(validPaths.length > 1 ? { files: validPaths } : {})
     }
 
-    try {
-      const icon = await app.getFileIcon(validPaths[0], { size: 'normal' })
-
-      event.sender.startDrag({
-        ...item,
-        icon: icon.isEmpty() ? fallbackDragIcon : icon
-      })
-      return
-    } catch {
-      // Fall back to a generated non-empty image if the OS cannot provide an icon.
-    }
+    const icon = iconDataUrl ? nativeImage.createFromDataURL(iconDataUrl) : fallbackDragIcon
 
     event.sender.startDrag({
       ...item,
-      icon: fallbackDragIcon
+      icon: icon.isEmpty() ? fallbackDragIcon : icon
     })
   })
 

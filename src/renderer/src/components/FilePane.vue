@@ -255,7 +255,7 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
     event.dataTransfer.effectAllowed = 'copyMove'
   }
 
-  window.electron.fileManager.startNativeDrag(draggedPaths)
+  window.electron.fileManager.startNativeDrag(draggedPaths, props.iconCache[entry.path])
 }
 
 const finishEntryDrag = (): void => {
