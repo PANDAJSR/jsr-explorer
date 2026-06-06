@@ -1145,6 +1145,10 @@ const registerFileManagerHandlers = (): void => {
     }
   })
 
+  ipcMain.handle('file-manager:write-clipboard-text', (_, text: string) => {
+    clipboard.writeText(text)
+  })
+
   ipcMain.handle('file-manager:write-clipboard-paths', (_, sourcePaths: string[], mode: ClipboardMode) => {
     writeClipboardPaths(sourcePaths, mode)
   })

@@ -132,6 +132,7 @@ interface Window {
         options: ArchiveCreationOptions
       ) => Promise<string>
       trashPaths: (sourcePaths: string[]) => Promise<void>
+      writeClipboardText: (text: string) => Promise<void>
       writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') => Promise<void>
       pasteClipboardPaths: (destinationDirectory: string) => Promise<string[]>
       startNativeDrag: (sourcePaths: string[], iconDataUrl?: string) => void

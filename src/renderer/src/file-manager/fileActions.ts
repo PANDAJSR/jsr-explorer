@@ -2,6 +2,13 @@ import type { ArchiveCreationOptions, FileTabState } from './types'
 
 type LoadDirectory = (tab: FileTabState, directoryPath: string, pushHistory?: boolean) => Promise<void>
 type RequestName = (message: string, defaultValue?: string) => Promise<string | null>
+export type CopyPathTextFormat =
+  | 'standard'
+  | 'windowsSlash'
+  | 'singleQuoted'
+  | 'singleQuotedWindowsSlash'
+  | 'fileName'
+  | 'fileNameWithoutExtension'
 
 export const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
   tab.selectedPaths
@@ -9,6 +16,50 @@ export const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
     .filter((entry): entry is FileManagerEntry => Boolean(entry))
 
 export const getSelectedPaths = (tab: FileTabState): string[] => getSelectedEntries(tab).map((entry) => entry.path)
+
+const toWindowsSlashes = (path: string): string => path.replaceAll('/', '\\')
+
+const quotePath = (path: string): string => `'${path.replaceAll("'", "'\\''")}'`
+
+const removeFileExtension = (name: string): string => {
+  const extensionIndex = name.lastIndexOf('.')
+
+  if (extensionIndex <= 0) {
+    return name
+  }
+
+  return name.slice(0, extensionIndex)
+}
+
+const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat): string => {
+  switch (format) {
+    case 'windowsSlash':
+      return toWindowsSlashes(entry.path)
+    case 'singleQuoted':
+      return quotePath(entry.path)
+    case 'singleQuotedWindowsSlash':
+      return quotePath(toWindowsSlashes(entry.path))
+    case 'fileName':
+      return entry.name
+    case 'fileNameWithoutExtension':
+      return removeFileExtension(entry.name)
+    case 'standard':
+      return entry.path
+  }
+}
+
+export const copySelectionPathsAsText = async (tab: FileTabState, format: CopyPathTextFormat): Promise<void> => {
+  const selectedEntries = getSelectedEntries(tab)
+
+  if (selectedEntries.length === 0) {
+    tab.errorMessage = '未选择对象。'
+    return
+  }
+
+  await window.electron.fileManager.writeClipboardText(
+    selectedEntries.map((entry) => formatEntryPathText(entry, format)).join('\n')
+  )
+}
 
 const refreshAndSelect = async (tab: FileTabState, paths: string[], loadDirectory: LoadDirectory): Promise<void> => {
   await loadDirectory(tab, tab.currentPath, false)

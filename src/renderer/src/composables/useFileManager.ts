@@ -9,6 +9,7 @@ import ShortcutHelp from '../components/ShortcutHelp.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import {
   copySelectionToClipboard,
+  copySelectionPathsAsText,
   copySelectionToSecondary,
   createArchiveFromSelection,
   createFolder,
@@ -27,9 +28,17 @@ import { createFileManagerLayoutSnapshot, normalizeFileManagerLayout } from '../
 import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
+import type { CopyPathTextFormat } from '../file-manager/fileActions'
 import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, PersistedFileManagerLayout, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
+
+type ContextMenuItem = {
+  enabled: boolean
+  label: string
+  action?: () => void
+  children?: ContextMenuItem[]
+}
 
 const readFavoritePaths = (): FavoritePath[] => {
   try {
@@ -82,7 +91,7 @@ const columns = reactive<Record<ColumnKey, number>>({
   size: 150
 })
 const contextMenu = ref<{
-  items: Array<{ enabled: boolean; label: string; action: () => void }>
+  items: ContextMenuItem[]
   x: number
   y: number
 } | null>(null)
@@ -804,9 +813,26 @@ const submitArchiveDialog = (options: ArchiveCreationOptions): void => {
   archiveDialog.value = null
   void createArchiveFromSelection(dialog.tab, loadDirectory, options)
 }
+const createCopyPathMenuItems = (tab: FileTabState, enabled: boolean, wrap: (action: () => void) => () => void): ContextMenuItem[] => {
+  const createItem = (label: string, format: CopyPathTextFormat): ContextMenuItem => ({
+    label,
+    enabled,
+    action: wrap(() => void copySelectionPathsAsText(tab, format))
+  })
+
+  return [
+    createItem('标准', 'standard'),
+    createItem('Win斜杠\\', 'windowsSlash'),
+    createItem('带单引号', 'singleQuoted'),
+    createItem('带单引号和Win斜杠\\', 'singleQuotedWindowsSlash'),
+    createItem('仅文件名', 'fileName'),
+    createItem('仅文件名（不带扩展名）', 'fileNameWithoutExtension')
+  ]
+}
 const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
   event.preventDefault()
   const hasSelection = tab.selectedPaths.length > 0
+  const hasSelectionTargetSelection = hasSelectionTarget && hasSelection
   const wrap = (action: () => void): (() => void) => () => {
     hideContextMenu()
     action()
@@ -815,12 +841,13 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
     x: event.clientX,
     y: event.clientY,
     items: [
-      { label: '复制', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void copySelectionToClipboard(tab)) },
-      { label: '剪切', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void cutSelectionToClipboard(tab)) },
-      { label: '复制并粘贴', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void duplicateSelection(tab, loadDirectory)) },
-      { label: '打压缩包', enabled: hasSelectionTarget && hasSelection, action: wrap(() => showArchiveDialog(tab)) },
-      { label: '重命名', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory, requestName)) },
-      { label: '删除', enabled: hasSelectionTarget && hasSelection, action: wrap(() => void trashSelection(tab, loadDirectory)) },
+      { label: '复制', enabled: hasSelectionTargetSelection, action: wrap(() => void copySelectionToClipboard(tab)) },
+      { label: '复制路径', enabled: hasSelectionTargetSelection, children: createCopyPathMenuItems(tab, hasSelectionTargetSelection, wrap) },
+      { label: '剪切', enabled: hasSelectionTargetSelection, action: wrap(() => void cutSelectionToClipboard(tab)) },
+      { label: '复制并粘贴', enabled: hasSelectionTargetSelection, action: wrap(() => void duplicateSelection(tab, loadDirectory)) },
+      { label: '打压缩包', enabled: hasSelectionTargetSelection, action: wrap(() => showArchiveDialog(tab)) },
+      { label: '重命名', enabled: hasSelectionTargetSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory, requestName)) },
+      { label: '删除', enabled: hasSelectionTargetSelection, action: wrap(() => void trashSelection(tab, loadDirectory)) },
       { label: '粘贴', enabled: true, action: wrap(() => void pasteClipboardIntoTab(tab, loadDirectory)) },
       { label: '新建文件夹', enabled: true, action: wrap(() => void createFolder(tab, loadDirectory, requestName)) }
     ]

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electron', {
       }
     ) => ipcRenderer.invoke('file-manager:create-archive', sourcePaths, destinationDirectory, options),
     trashPaths: (sourcePaths: string[]) => ipcRenderer.invoke('file-manager:trash-paths', sourcePaths),
+    writeClipboardText: (text: string) => ipcRenderer.invoke('file-manager:write-clipboard-text', text),
     writeClipboardPaths: (sourcePaths: string[], mode: 'copy' | 'cut') =>
       ipcRenderer.invoke('file-manager:write-clipboard-paths', sourcePaths, mode),
     pasteClipboardPaths: (destinationDirectory: string) =>

@@ -4,7 +4,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 type ContextMenuItem = {
   enabled: boolean
   label: string
-  action: () => void
+  action?: () => void
+  children?: ContextMenuItem[]
 }
 
 const props = defineProps<{
@@ -45,6 +46,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', clampMenuToViewport)
 })
+
+const runItemAction = (item: ContextMenuItem): void => {
+  if (!item.enabled || item.children?.length) {
+    return
+  }
+
+  item.action?.()
+}
 </script>
 
 <template>
@@ -55,15 +64,33 @@ onBeforeUnmount(() => {
     @mousedown.stop
     @contextmenu.prevent
   >
-    <button
+    <div
       v-for="item in items"
       :key="item.label"
-      class="context-menu-item"
-      type="button"
-      :disabled="!item.enabled"
-      @click="item.action"
+      class="context-menu-row"
+      :class="{ 'has-submenu': item.children?.length }"
     >
-      {{ item.label }}
-    </button>
+      <button
+        class="context-menu-item"
+        type="button"
+        :disabled="!item.enabled"
+        @click="runItemAction(item)"
+      >
+        <span>{{ item.label }}</span>
+        <span v-if="item.children?.length" class="context-menu-arrow">›</span>
+      </button>
+      <div v-if="item.children?.length" class="context-submenu">
+        <button
+          v-for="child in item.children"
+          :key="child.label"
+          class="context-menu-item"
+          type="button"
+          :disabled="!child.enabled"
+          @click="runItemAction(child)"
+        >
+          <span>{{ child.label }}</span>
+        </button>
+      </div>
+    </div>
   </div>
 </template>
