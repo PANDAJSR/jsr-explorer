@@ -7,6 +7,8 @@ export type CopyPathTextFormat =
   | 'windowsSlash'
   | 'singleQuoted'
   | 'singleQuotedWindowsSlash'
+  | 'homeRelative'
+  | 'singleQuotedHomeRelative'
   | 'fileName'
   | 'fileNameWithoutExtension'
 
@@ -31,7 +33,25 @@ const removeFileExtension = (name: string): string => {
   return name.slice(0, extensionIndex)
 }
 
-const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat): string => {
+export const toHomeRelativePath = (path: string, homeDirectory: string): string | null => {
+  if (!homeDirectory) {
+    return null
+  }
+
+  const normalizedHome = homeDirectory.replace(/[\\/]+$/, '')
+
+  if (path === normalizedHome) {
+    return '~'
+  }
+
+  if (!path.startsWith(`${normalizedHome}/`) && !path.startsWith(`${normalizedHome}\\`)) {
+    return null
+  }
+
+  return `~/${path.slice(normalizedHome.length + 1).replaceAll('\\', '/')}`
+}
+
+const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat, homeDirectory: string): string => {
   switch (format) {
     case 'windowsSlash':
       return toWindowsSlashes(entry.path)
@@ -39,6 +59,10 @@ const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat
       return quotePath(entry.path)
     case 'singleQuotedWindowsSlash':
       return quotePath(toWindowsSlashes(entry.path))
+    case 'homeRelative':
+      return toHomeRelativePath(entry.path, homeDirectory) ?? entry.path
+    case 'singleQuotedHomeRelative':
+      return quotePath(toHomeRelativePath(entry.path, homeDirectory) ?? entry.path)
     case 'fileName':
       return entry.name
     case 'fileNameWithoutExtension':
@@ -48,7 +72,11 @@ const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat
   }
 }
 
-export const copySelectionPathsAsText = async (tab: FileTabState, format: CopyPathTextFormat): Promise<void> => {
+export const copySelectionPathsAsText = async (
+  tab: FileTabState,
+  format: CopyPathTextFormat,
+  homeDirectory = ''
+): Promise<void> => {
   const selectedEntries = getSelectedEntries(tab)
 
   if (selectedEntries.length === 0) {
@@ -57,7 +85,7 @@ export const copySelectionPathsAsText = async (tab: FileTabState, format: CopyPa
   }
 
   await window.electron.fileManager.writeClipboardText(
-    selectedEntries.map((entry) => formatEntryPathText(entry, format)).join('\n')
+    selectedEntries.map((entry) => formatEntryPathText(entry, format, homeDirectory)).join('\n')
   )
 }
 

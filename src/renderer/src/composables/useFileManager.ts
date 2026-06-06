@@ -19,6 +19,7 @@ import {
   moveSelectionToSecondary,
   pasteClipboardIntoTab,
   renameActiveItem,
+  toHomeRelativePath,
   trashSelection
 } from '../file-manager/fileActions'
 import { getDirectionalPaneId } from '../file-manager/focusNavigation'
@@ -73,6 +74,7 @@ const createFavoritePath = (path: string): FavoritePath => ({
 export const useFileManager = () => {
 const panes = reactive<Record<string, PaneState>>({})
 const platform = ref<Platform>('darwin')
+const homeDirectory = ref('')
 const focusedPaneId = ref('')
 const secondaryPaneId = ref<string | null>(null)
 const favorites = ref<FavoritePath[]>([])
@@ -303,13 +305,13 @@ const scheduleLayoutSave = (): void => {
   }, 200)
 }
 const loadDefaultHomeLayout = async (): Promise<void> => {
-  const homeDirectory = await window.electron.fileManager.getHomeDirectory()
+  const defaultHomeDirectory = await window.electron.fileManager.getHomeDirectory()
   const tab = focusedTab.value
 
   if (tab) {
-    tab.currentPath = homeDirectory
-    lastFocusedFilePath.value = homeDirectory
-    await loadDirectory(tab, homeDirectory, false)
+    tab.currentPath = defaultHomeDirectory
+    lastFocusedFilePath.value = defaultHomeDirectory
+    await loadDirectory(tab, defaultHomeDirectory, false)
   }
 }
 const replacePanes = (nextPanes: PaneState[]): void => {
@@ -817,17 +819,29 @@ const createCopyPathMenuItems = (tab: FileTabState, enabled: boolean, wrap: (act
   const createItem = (label: string, format: CopyPathTextFormat): ContextMenuItem => ({
     label,
     enabled,
-    action: wrap(() => void copySelectionPathsAsText(tab, format))
+    action: wrap(() => void copySelectionPathsAsText(tab, format, homeDirectory.value))
   })
+  const selectedEntries = getSelectedEntries(tab)
+  const canUseHomeRelativePath =
+    selectedEntries.length > 0 && selectedEntries.every((entry) => toHomeRelativePath(entry.path, homeDirectory.value) !== null)
 
-  return [
+  const items = [
     createItem('标准', 'standard'),
     createItem('Win斜杠\\', 'windowsSlash'),
     createItem('带单引号', 'singleQuoted'),
-    createItem('带单引号和Win斜杠\\', 'singleQuotedWindowsSlash'),
+    createItem('带单引号和Win斜杠\\', 'singleQuotedWindowsSlash')
+  ]
+
+  if (canUseHomeRelativePath) {
+    items.push(createItem('带~的路径', 'homeRelative'), createItem('带单引号和~的路径', 'singleQuotedHomeRelative'))
+  }
+
+  items.push(
     createItem('仅文件名', 'fileName'),
     createItem('仅文件名（不带扩展名）', 'fileNameWithoutExtension')
-  ]
+  )
+
+  return items
 }
 const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
   event.preventDefault()
@@ -1059,6 +1073,7 @@ onMounted(async () => {
   })
   favorites.value = readFavoritePaths()
   platform.value = await window.electron.fileManager.getPlatform()
+  homeDirectory.value = await window.electron.fileManager.getHomeDirectory()
   await hydrateLayout()
   isLayoutHydrated = true
   saveLayout()
