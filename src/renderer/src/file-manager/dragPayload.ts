@@ -17,27 +17,13 @@ export const createFilePathDragPayload = (
 })
 
 let activeFilePathDragPayload: FilePathDragPayload | null = null
-let activeFilePathDragPayloadTimer: number | null = null
 
 export const setActiveFilePathDragPayload = (payload: FilePathDragPayload): void => {
   activeFilePathDragPayload = payload
-
-  if (activeFilePathDragPayloadTimer !== null) {
-    window.clearTimeout(activeFilePathDragPayloadTimer)
-  }
-
-  activeFilePathDragPayloadTimer = window.setTimeout(() => {
-    clearActiveFilePathDragPayload()
-  }, 120000)
 }
 
 export const clearActiveFilePathDragPayload = (): void => {
   activeFilePathDragPayload = null
-
-  if (activeFilePathDragPayloadTimer !== null) {
-    window.clearTimeout(activeFilePathDragPayloadTimer)
-    activeFilePathDragPayloadTimer = null
-  }
 }
 
 export const readFilePathDragPayload = (event: DragEvent): FilePathDragPayload => {
@@ -63,39 +49,25 @@ export const readFilePathDragPayload = (event: DragEvent): FilePathDragPayload =
     }
   }
 
-  const uriList = event.dataTransfer?.getData('text/uri-list')
-  if (uriList) {
-    const paths = uriList
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-      .map((line) => (line.startsWith('file://') ? decodeURIComponent(line.replace('file://', '')) : line))
-
-    return {
-      paths,
-      sourcePaneId: activeFilePathDragPayload?.sourcePaneId,
-      sourceTabId: activeFilePathDragPayload?.sourceTabId
-    }
-  }
-
-  const filePaths = [...(event.dataTransfer?.files ?? [])]
-    .map((file) => window.electron.fileManager.getPathForFile(file))
-    .filter(Boolean)
-
-  if (filePaths.length > 0) {
-    return {
-      paths: filePaths,
-      sourcePaneId: activeFilePathDragPayload?.sourcePaneId,
-      sourceTabId: activeFilePathDragPayload?.sourceTabId
-    }
-  }
-
   if (activeFilePathDragPayload) {
     return activeFilePathDragPayload
   }
 
+  const uriList = event.dataTransfer?.getData('text/uri-list')
+  if (uriList) {
+    return {
+      paths: uriList
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'))
+        .map((line) => (line.startsWith('file://') ? decodeURIComponent(line.replace('file://', '')) : line))
+    }
+  }
+
   return {
-    paths: []
+    paths: [...(event.dataTransfer?.files ?? [])]
+      .map((file) => window.electron.fileManager.getPathForFile(file))
+      .filter(Boolean)
   }
 }
 
