@@ -17,27 +17,13 @@ export const createFilePathDragPayload = (
 })
 
 let activeFilePathDragPayload: FilePathDragPayload | null = null
-let activeFilePathDragPayloadTimer: number | null = null
 
 export const setActiveFilePathDragPayload = (payload: FilePathDragPayload): void => {
   activeFilePathDragPayload = payload
-
-  if (activeFilePathDragPayloadTimer !== null) {
-    window.clearTimeout(activeFilePathDragPayloadTimer)
-  }
-
-  activeFilePathDragPayloadTimer = window.setTimeout(() => {
-    clearActiveFilePathDragPayload()
-  }, 120000)
 }
 
 export const clearActiveFilePathDragPayload = (): void => {
   activeFilePathDragPayload = null
-
-  if (activeFilePathDragPayloadTimer !== null) {
-    window.clearTimeout(activeFilePathDragPayloadTimer)
-    activeFilePathDragPayloadTimer = null
-  }
 }
 
 export const readFilePathDragPayload = (event: DragEvent): FilePathDragPayload => {
@@ -91,7 +77,6 @@ export const readDraggedFilePaths = (event: DragEvent): string[] => {
 
 export const hasDraggedFilePaths = (event: DragEvent): boolean =>
   Boolean(
-    activeFilePathDragPayload ||
     event.dataTransfer?.types.includes(filePathDragMimeType) ||
       event.dataTransfer?.types.includes('Files') ||
       event.dataTransfer?.types.includes('text/uri-list')
