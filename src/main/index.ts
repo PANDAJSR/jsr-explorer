@@ -714,6 +714,10 @@ const movePathToDirectory = async (sourcePath: string, destinationDirectory: str
     throw new Error(`${destinationDirectory} 不是文件夹`)
   }
 
+  if (dirname(sourcePath) === destinationDirectory) {
+    return sourcePath
+  }
+
   const destinationPath = await getAvailableCopyPath(sourcePath, destinationDirectory)
 
   try {
@@ -1129,27 +1133,18 @@ const registerFileManagerHandlers = (): void => {
     return pastedPaths
   })
 
-  ipcMain.on('file-manager:start-native-drag', async (event, sourcePaths: string[]) => {
+  ipcMain.on('file-manager:start-native-drag', (event, sourcePaths: string[]) => {
     const validPaths = sourcePaths.filter(Boolean)
 
     if (validPaths.length === 0) {
       return
     }
 
-    try {
-      const icon = await app.getFileIcon(validPaths[0], { size: 'normal' })
-      event.sender.startDrag({
-        file: validPaths[0],
-        files: validPaths,
-        icon: icon.isEmpty() ? fallbackDragIcon : icon
-      })
-    } catch {
-      event.sender.startDrag({
-        file: validPaths[0],
-        files: validPaths,
-        icon: fallbackDragIcon
-      })
-    }
+    event.sender.startDrag({
+      file: validPaths[0],
+      files: validPaths,
+      icon: fallbackDragIcon
+    })
   })
 
   ipcMain.handle('file-manager:get-platform', () => process.platform)

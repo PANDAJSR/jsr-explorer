@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { match } from 'pinyin-pro'
 import { computed, nextTick, ref, watch } from 'vue'
-import { filePathDragMimeType, hasDraggedFilePaths, readDraggedFilePaths } from '../file-manager/dragPayload'
+import {
+  createFilePathDragPayload,
+  filePathDragMimeType,
+  hasDraggedFilePaths,
+  readFilePathDragPayload
+} from '../file-manager/dragPayload'
 import { formatModifiedAt, formatSize, getPathLabel } from '../file-manager/formatters'
 import { getPathSegments } from '../file-manager/pathSegments'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
@@ -27,7 +32,10 @@ const emit = defineEmits<{
   goUp: [tab: FileTabState]
   setSort: [tab: FileTabState, key: SortKey]
   resizeColumn: [event: MouseEvent, column: ColumnKey]
-  dropPaths: [tab: FileTabState, paths: string[]]
+  dropPaths: [
+    tab: FileTabState,
+    payload: { paths: string[]; operation: 'copy' | 'move'; sourcePaneId?: string; sourceTabId?: string }
+  ]
   showContextMenu: [tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean]
 }>()
 
@@ -236,22 +244,16 @@ const startEntryDrag = (event: DragEvent, entry: FileManagerEntry): void => {
   ensureDraggedEntryIsSelected(entry)
 
   const draggedPaths = getDraggedPaths(entry)
+  const payload = createFilePathDragPayload(draggedPaths, props.pane.id, props.tab.id)
 
-  event.dataTransfer?.setData(filePathDragMimeType, JSON.stringify(draggedPaths))
-  event.dataTransfer?.setData('text/plain', draggedPaths.join('\n'))
-  event.dataTransfer?.setData(
-    'text/uri-list',
-    draggedPaths.map((path) => `file://${encodeURI(path)}`).join('\n')
-  )
+  event.dataTransfer?.setData(filePathDragMimeType, JSON.stringify(payload))
 
   if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.effectAllowed = 'copyMove'
   }
 
   window.electron.fileManager.startNativeDrag(draggedPaths)
 }
-
-const getDroppedPaths = (event: DragEvent): string[] => readDraggedFilePaths(event)
 
 const handlePaneDragOver = (event: DragEvent): void => {
   if (!event.dataTransfer) {
@@ -260,19 +262,29 @@ const handlePaneDragOver = (event: DragEvent): void => {
 
   if (hasDraggedFilePaths(event)) {
     event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
+    event.dataTransfer.dropEffect = event.shiftKey ? 'move' : 'copy'
   }
 }
 
 const handlePaneDrop = (event: DragEvent): void => {
-  const droppedPaths = getDroppedPaths(event)
+  const payload = readFilePathDragPayload(event)
 
-  if (droppedPaths.length === 0) {
+  if (payload.paths.length === 0) {
     return
   }
 
   event.preventDefault()
-  emit('dropPaths', props.tab, droppedPaths)
+
+  if (payload.sourcePaneId === props.pane.id) {
+    return
+  }
+
+  emit('dropPaths', props.tab, {
+    paths: payload.paths,
+    operation: payload.sourcePaneId && event.shiftKey ? 'move' : 'copy',
+    sourcePaneId: payload.sourcePaneId,
+    sourceTabId: payload.sourceTabId
+  })
 }
 
 const startPathEditing = async (): Promise<void> => {

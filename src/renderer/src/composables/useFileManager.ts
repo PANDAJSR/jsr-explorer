@@ -678,20 +678,34 @@ const moveSelectedFileToSecondaryPane = async (): Promise<void> => {
     await moveSelectionToSecondary(focusedTab.value, secondaryTab.value, loadDirectory)
   }
 }
-const copyDroppedPathsToTab = async (tab: FileTabState, sourcePaths: string[]): Promise<void> => {
-  const filteredPaths = [...new Set(sourcePaths.filter(Boolean))]
+const getTabById = (tabId: string | undefined): FileTabState | null =>
+  tabId ? getOpenTabs().find((tab) => tab.id === tabId) ?? null : null
+const dropPathsToTab = async (
+  tab: FileTabState,
+  payload: { paths: string[]; operation: 'copy' | 'move'; sourceTabId?: string }
+): Promise<void> => {
+  const filteredPaths = [...new Set(payload.paths.filter(Boolean))]
   if (filteredPaths.length === 0) {
     return
   }
   tab.errorMessage = ''
   try {
-    const copiedPaths = await window.electron.fileManager.copyPathsToDirectory(filteredPaths, tab.currentPath)
+    const droppedPaths =
+      payload.operation === 'move'
+        ? await window.electron.fileManager.movePathsToDirectory(filteredPaths, tab.currentPath)
+        : await window.electron.fileManager.copyPathsToDirectory(filteredPaths, tab.currentPath)
+    const sourceTab = payload.operation === 'move' ? getTabById(payload.sourceTabId) : null
+
+    if (sourceTab && sourceTab !== tab) {
+      await loadDirectory(sourceTab, sourceTab.currentPath, false)
+    }
+
     await loadDirectory(tab, tab.currentPath, false)
-    tab.selectedPaths = copiedPaths
-    tab.activePath = copiedPaths.at(-1) ?? null
-    tab.selectionAnchorPath = copiedPaths[0] ?? null
+    tab.selectedPaths = droppedPaths
+    tab.activePath = droppedPaths.at(-1) ?? null
+    tab.selectionAnchorPath = droppedPaths[0] ?? null
   } catch (error) {
-    tab.errorMessage = error instanceof Error ? error.message : '无法复制拖入对象。'
+    tab.errorMessage = error instanceof Error ? error.message : '无法处理拖入对象。'
   }
 }
 const runOnFocusedTab = (action: (tab: FileTabState) => void | Promise<void>): void => {
@@ -961,7 +975,7 @@ const SplitNodeView = defineComponent({
           onGoUp: goUp,
           onSetSort: setSort,
           onResizeColumn: startColumnResize,
-          onDropPaths: copyDroppedPathsToTab,
+          onDropPaths: dropPathsToTab,
           onShowContextMenu: showContextMenu
         })
       }
