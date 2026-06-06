@@ -5,6 +5,7 @@ import FavoritesManager from '../components/FavoritesManager.vue'
 import FilePane from '../components/FilePane.vue'
 import NameDialog from '../components/NameDialog.vue'
 import QuickPreview from '../components/QuickPreview.vue'
+import SearchPane from '../components/SearchPane.vue'
 import ShortcutHelp from '../components/ShortcutHelp.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import {
@@ -30,7 +31,7 @@ import { createStateFactory } from '../file-manager/stateFactory'
 import { sortEntriesForTab } from '../file-manager/sortEntries'
 import { findFirstPaneId, removePaneNode, replacePaneNode } from '../file-manager/splitTree'
 import type { CopyPathTextFormat } from '../file-manager/fileActions'
-import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, PersistedFileManagerLayout, Platform, QuickPreviewState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
+import type { ArchiveCreationOptions, ColumnKey, FavoritePath, FileTabState, MoveDirection, PaneState, PersistedFileManagerLayout, Platform, QuickPreviewState, SearchTabState, SortKey, SplitDirection, SplitNode, TerminalPaneState } from '../file-manager/types'
 
 const favoriteStorageKey = 'jsr-explorer.favorite-paths'
 
@@ -107,7 +108,9 @@ let stopSplitResize: (() => void) | null = null
 let stopDirectoryChanged: (() => void) | null = null
 let persistLayoutTimer: number | null = null
 let isLayoutHydrated = false
-const { cloneTabForPath, createPane, createTab, createTerminalPane, createTerminalTab } = createStateFactory()
+type SelectableTabState = FileTabState | SearchTabState
+
+const { cloneSearchTab, cloneTabForPath, createPane, createSearchPane, createSearchTab, createTab, createTerminalPane, createTerminalTab } = createStateFactory()
 const initialPane = createPane('')
 panes[initialPane.id] = initialPane
 focusedPaneId.value = initialPane.id
@@ -120,12 +123,18 @@ const focusedPane = computed(() => panes[focusedPaneId.value] ?? null)
 const secondaryPane = computed(() => (secondaryPaneId.value ? panes[secondaryPaneId.value] ?? null : null))
 const getActiveFileTab = (pane: PaneState | null): FileTabState | null =>
   pane?.kind === 'files' ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
+const getActiveSearchTab = (pane: PaneState | null): SearchTabState | null =>
+  pane?.kind === 'search' ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
 const getActiveTerminalTab = (pane: PaneState | null) =>
   pane?.kind === 'terminal' ? pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null : null
 const focusedTab = computed(() => getActiveFileTab(focusedPane.value))
+const focusedSearchTab = computed(() => getActiveSearchTab(focusedPane.value))
+const focusedSelectableTab = computed<SelectableTabState | null>(() => focusedTab.value ?? focusedSearchTab.value)
 const secondaryTab = computed(() => getActiveFileTab(secondaryPane.value))
 const getOpenTabs = (): FileTabState[] =>
   Object.values(panes).flatMap((pane) => (pane.kind === 'files' ? pane.tabs : []))
+const getOpenSearchTabs = (): SearchTabState[] =>
+  Object.values(panes).flatMap((pane) => (pane.kind === 'search' ? pane.tabs : []))
 const getOpenDirectoryPaths = (): string[] => [
   ...new Set(getOpenTabs().map((tab) => tab.currentPath).filter((path) => path.length > 0))
 ]
@@ -144,7 +153,12 @@ const focusPane = (paneId: string): void => {
   if (!panes[paneId] || panes[paneId].isClosing || paneId === focusedPaneId.value) {
     return
   }
-  secondaryPaneId.value = focusedPaneId.value || null
+  const previousFocusedPane = panes[focusedPaneId.value]
+  if (previousFocusedPane?.kind === 'files') {
+    secondaryPaneId.value = focusedPaneId.value || null
+  } else if (secondaryPaneId.value === paneId) {
+    secondaryPaneId.value = null
+  }
   focusedPaneId.value = paneId
   const tab = getActiveFileTab(panes[paneId])
   if (tab?.currentPath) {
@@ -273,12 +287,64 @@ const refreshDirectory = async (tab: FileTabState, directoryPath: string): Promi
     }
   }
 }
+const runSearch = async (tab: SearchTabState): Promise<void> => {
+  const sequence = (tab.loadSequence += 1)
+  const searchPath = tab.searchPath.trim()
+  const query = tab.query.trim()
+
+  tab.errorMessage = ''
+
+  if (!searchPath) {
+    tab.errorMessage = '搜索路径不能为空。'
+    tab.entries = []
+    tab.selectedPaths = []
+    tab.activePath = null
+    tab.selectionAnchorPath = null
+    return
+  }
+
+  tab.isLoading = true
+
+  try {
+    const payload = await window.electron.fileManager.searchPaths(searchPath, query)
+
+    if (sequence !== tab.loadSequence) {
+      return
+    }
+
+    const entryPaths = new Set(payload.entries.map((entry) => entry.path))
+    tab.searchPath = payload.path
+    tab.query = payload.query
+    tab.searchedQuery = query
+    tab.entries = payload.entries
+    tab.selectedPaths = tab.selectedPaths.filter((selectedPath) => entryPaths.has(selectedPath))
+    tab.activePath = tab.activePath && entryPaths.has(tab.activePath) ? tab.activePath : tab.selectedPaths.at(-1) ?? null
+    tab.selectionAnchorPath =
+      tab.selectionAnchorPath && entryPaths.has(tab.selectionAnchorPath)
+        ? tab.selectionAnchorPath
+        : tab.selectedPaths[0] ?? tab.activePath
+    tab.isTruncated = payload.truncated
+    loadFileIcons(payload.entries)
+  } catch (error) {
+    if (sequence === tab.loadSequence) {
+      tab.errorMessage = error instanceof Error ? error.message : '无法搜索文件。'
+      tab.entries = []
+      tab.selectedPaths = []
+      tab.activePath = null
+      tab.selectionAnchorPath = null
+    }
+  } finally {
+    if (sequence === tab.loadSequence) {
+      tab.isLoading = false
+    }
+  }
+}
 const createLayoutSnapshot = (): PersistedFileManagerLayout =>
   createFileManagerLayoutSnapshot(
     panes,
     rootNode.value,
     focusedPaneId.value,
-    secondaryPaneId.value,
+    secondaryPaneId.value && panes[secondaryPaneId.value]?.kind === 'files' ? secondaryPaneId.value : null,
     lastFocusedFilePath.value
   )
 const saveLayout = (): void => {
@@ -337,6 +403,19 @@ const restoreLayout = async (layout: PersistedFileManagerLayout): Promise<void> 
       return pane
     }
 
+    if (paneLayout.kind === 'search') {
+      const pane = createSearchPane(paneLayout.tabs[0].searchPath, paneLayout.tabs[0].query, paneLayout.id, paneLayout.tabs[0].id)
+      pane.tabs = paneLayout.tabs.map((tabLayout) => ({
+        ...createSearchTab(tabLayout.searchPath, tabLayout.query, tabLayout.id),
+        sortKey: tabLayout.sortKey,
+        sortDirection: tabLayout.sortDirection
+      }))
+      pane.activeTabId = pane.tabs.some((tab) => tab.id === paneLayout.activeTabId)
+        ? paneLayout.activeTabId
+        : pane.tabs[0].id
+      return pane
+    }
+
     const pane = createPane(paneLayout.tabs[0].currentPath, paneLayout.id, paneLayout.tabs[0].id)
     pane.tabs = paneLayout.tabs.map((tabLayout) => ({
       ...createTab(tabLayout.currentPath, tabLayout.id),
@@ -352,10 +431,13 @@ const restoreLayout = async (layout: PersistedFileManagerLayout): Promise<void> 
   replacePanes(nextPanes)
   rootNode.value = layout.rootNode
   focusedPaneId.value = panes[layout.focusedPaneId] ? layout.focusedPaneId : findFirstPaneId(rootNode.value)
-  secondaryPaneId.value = layout.secondaryPaneId && panes[layout.secondaryPaneId] ? layout.secondaryPaneId : null
+  secondaryPaneId.value = layout.secondaryPaneId && panes[layout.secondaryPaneId]?.kind === 'files' ? layout.secondaryPaneId : null
   lastFocusedFilePath.value = layout.lastFocusedFilePath
 
-  await Promise.all(getOpenTabs().map((tab) => loadDirectory(tab, tab.currentPath, false)))
+  await Promise.all([
+    ...getOpenTabs().map((tab) => loadDirectory(tab, tab.currentPath, false)),
+    ...getOpenSearchTabs().filter((tab) => tab.query.trim().length > 0).map((tab) => runSearch(tab))
+  ])
 }
 const hydrateLayout = async (): Promise<void> => {
   const persistedLayout = normalizeFileManagerLayout(await window.electron.fileManager.readLayout())
@@ -378,15 +460,33 @@ const openEntry = async (tab: FileTabState, entry: FileManagerEntry): Promise<vo
     tab.errorMessage = error instanceof Error ? error.message : '无法打开对象。'
   }
 }
+const openSearchEntry = async (tab: SearchTabState, entry: FileManagerEntry): Promise<void> => {
+  tab.errorMessage = ''
+  try {
+    const result = await window.electron.fileManager.openPath(entry.path)
+    if (result.action === 'enter-directory') {
+      const targetTab = secondaryTab.value ?? getOpenTabs()[0] ?? null
+      if (targetTab) {
+        await loadDirectory(targetTab, result.path)
+      }
+    }
+  } catch (error) {
+    tab.errorMessage = error instanceof Error ? error.message : '无法打开对象。'
+  }
+}
 const openSelected = async (): Promise<void> => {
-  const tab = focusedTab.value
+  const tab = focusedSelectableTab.value
   const entry = tab?.entries.find((item) => item.path === tab.activePath)
   if (tab && entry) {
+    if (tab.kind === 'search') {
+      await openSearchEntry(tab, entry)
+      return
+    }
     await openEntry(tab, entry)
   }
 }
 const previewSelected = async (): Promise<void> => {
-  const tab = focusedTab.value
+  const tab = focusedSelectableTab.value
   const entry = tab?.entries.find((item) => item.path === tab.activePath)
 
   if (!tab || !entry || entry.type !== 'file') {
@@ -406,7 +506,7 @@ const closeQuickPreview = (): void => {
   quickPreview.value = null
 }
 const clearSelection = (): void => {
-  const tab = focusedTab.value
+  const tab = focusedSelectableTab.value
 
   if (!tab) {
     return
@@ -425,7 +525,7 @@ const scrollActiveRowIntoView = (paneId: string): void => {
 }
 const moveSelection = (direction: 'previous' | 'next', extendSelection: boolean): void => {
   const pane = focusedPane.value
-  const tab = focusedTab.value
+  const tab = focusedSelectableTab.value
   if (!pane || !tab || tab.entries.length === 0) {
     return
   }
@@ -476,7 +576,7 @@ const goUp = async (tab = focusedTab.value): Promise<void> => {
     await loadDirectory(tab, tab.parentPath)
   }
 }
-const setSort = (tab: FileTabState, key: SortKey): void => {
+const setSort = (tab: SelectableTabState, key: SortKey): void => {
   if (tab.sortKey === key) {
     tab.sortDirection = tab.sortDirection === 'asc' ? 'desc' : 'asc'
     return
@@ -573,6 +673,14 @@ const createTabInFocusedPane = (): void => {
     return
   }
 
+  if (pane.kind === 'search') {
+    const tab = getActiveSearchTab(pane)
+    const newTab = tab ? cloneSearchTab(tab) : createSearchTab(lastFocusedFilePath.value || homeDirectory.value)
+    pane.tabs.push(newTab)
+    pane.activeTabId = newTab.id
+    return
+  }
+
   const tab = getActiveFileTab(pane)
   if (tab) {
     const newTab = cloneTabForPath(tab)
@@ -586,7 +694,7 @@ const createTerminalTabInPane = (pane: TerminalPaneState): void => {
   pane.tabs.push(newTab)
   pane.activeTabId = newTab.id
 }
-const splitFocusedPane = (direction: SplitDirection, kind: 'files' | 'terminal' = 'files'): void => {
+const splitFocusedPane = (direction: SplitDirection, kind: 'files' | 'terminal' | 'search' = 'files'): void => {
   const sourcePane = focusedPane.value
   if (!sourcePane) {
     return
@@ -595,14 +703,16 @@ const splitFocusedPane = (direction: SplitDirection, kind: 'files' | 'terminal' 
   const sourceTab = focusedTab.value
   const cwd = getTerminalCwd() || sourceTab?.currentPath
 
-  if (!cwd) {
+  if (!cwd && kind !== 'search') {
     return
   }
 
   const newPane =
     kind === 'terminal'
       ? createTerminalPane(cwd)
-      : createPane(sourceTab?.currentPath || lastFocusedFilePath.value || cwd)
+      : kind === 'search'
+        ? createSearchPane(sourceTab?.currentPath || lastFocusedFilePath.value || homeDirectory.value || cwd || '')
+        : createPane(sourceTab?.currentPath || lastFocusedFilePath.value || cwd)
 
   if (kind === 'files' && sourceTab) {
     const newTab = cloneTabForPath(sourceTab)
@@ -648,7 +758,7 @@ const closePane = (paneId: string): void => {
     }
     rootNode.value = nextRootNode
     delete panes[paneId]
-    const preferredPaneId = secondaryPaneId.value && panes[secondaryPaneId.value] ? secondaryPaneId.value : null
+    const preferredPaneId = secondaryPaneId.value && panes[secondaryPaneId.value]?.kind === 'files' ? secondaryPaneId.value : null
     focusedPaneId.value = preferredPaneId ?? findFirstPaneId(rootNode.value)
     secondaryPaneId.value = null
   }, 180)
@@ -680,17 +790,23 @@ const moveFocus = (direction: MoveDirection): void => {
   }
 }
 const copySelectedFileToSecondaryPane = async (): Promise<void> => {
-  if (focusedTab.value) {
-    await copySelectionToSecondary(focusedTab.value, secondaryTab.value, loadDirectory)
+  if (focusedSelectableTab.value) {
+    await copySelectionToSecondary(focusedSelectableTab.value, secondaryTab.value, loadDirectory)
   }
 }
 const moveSelectedFileToSecondaryPane = async (): Promise<void> => {
-  if (focusedTab.value) {
-    await moveSelectionToSecondary(focusedTab.value, secondaryTab.value, loadDirectory)
+  const tab = focusedSelectableTab.value
+  if (tab) {
+    await moveSelectionToSecondary(
+      tab,
+      secondaryTab.value,
+      loadDirectory,
+      tab.kind === 'search' ? () => runSearch(tab) : undefined
+    )
   }
 }
-const getTabById = (tabId: string | undefined): FileTabState | null =>
-  tabId ? getOpenTabs().find((tab) => tab.id === tabId) ?? null : null
+const getSelectableTabById = (tabId: string | undefined): SelectableTabState | null =>
+  tabId ? [...getOpenTabs(), ...getOpenSearchTabs()].find((tab) => tab.id === tabId) ?? null : null
 const dropPathsToTab = async (
   tab: FileTabState,
   payload: { paths: string[]; operation: 'copy' | 'move'; sourceTabId?: string }
@@ -705,10 +821,14 @@ const dropPathsToTab = async (
       payload.operation === 'move'
         ? await window.electron.fileManager.movePathsToDirectory(filteredPaths, tab.currentPath)
         : await window.electron.fileManager.copyPathsToDirectory(filteredPaths, tab.currentPath)
-    const sourceTab = payload.operation === 'move' ? getTabById(payload.sourceTabId) : null
+    const sourceTab = payload.operation === 'move' ? getSelectableTabById(payload.sourceTabId) : null
 
     if (sourceTab && sourceTab !== tab) {
-      await loadDirectory(sourceTab, sourceTab.currentPath, false)
+      if (sourceTab.kind === 'search') {
+        await runSearch(sourceTab)
+      } else {
+        await loadDirectory(sourceTab, sourceTab.currentPath, false)
+      }
     }
 
     await loadDirectory(tab, tab.currentPath, false)
@@ -722,6 +842,11 @@ const dropPathsToTab = async (
 const runOnFocusedTab = (action: (tab: FileTabState) => void | Promise<void>): void => {
   if (focusedTab.value) {
     void action(focusedTab.value)
+  }
+}
+const runOnFocusedSelectableTab = (action: (tab: SelectableTabState) => void | Promise<void>): void => {
+  if (focusedSelectableTab.value) {
+    void action(focusedSelectableTab.value)
   }
 }
 const persistFavorites = (): void => {
@@ -802,6 +927,26 @@ const showArchiveDialog = (tab = focusedTab.value): void => {
     tab
   }
 }
+const trashSelectableSelection = async (tab: SelectableTabState): Promise<void> => {
+  if (tab.kind === 'file') {
+    await trashSelection(tab, loadDirectory)
+    return
+  }
+
+  const selectedEntries = getSelectedEntries(tab)
+
+  if (selectedEntries.length === 0) {
+    tab.errorMessage = '未选择对象。'
+    return
+  }
+
+  try {
+    await window.electron.fileManager.trashPaths(selectedEntries.map((entry) => entry.path))
+    await runSearch(tab)
+  } catch (error) {
+    tab.errorMessage = error instanceof Error ? error.message : '无法移入回收站。'
+  }
+}
 const closeArchiveDialog = (): void => {
   archiveDialog.value = null
 }
@@ -815,7 +960,7 @@ const submitArchiveDialog = (options: ArchiveCreationOptions): void => {
   archiveDialog.value = null
   void createArchiveFromSelection(dialog.tab, loadDirectory, options)
 }
-const createCopyPathMenuItems = (tab: FileTabState, enabled: boolean, wrap: (action: () => void) => () => void): ContextMenuItem[] => {
+const createCopyPathMenuItems = (tab: SelectableTabState, enabled: boolean, wrap: (action: () => void) => () => void): ContextMenuItem[] => {
   const createItem = (label: string, format: CopyPathTextFormat): ContextMenuItem => ({
     label,
     enabled,
@@ -843,10 +988,11 @@ const createCopyPathMenuItems = (tab: FileTabState, enabled: boolean, wrap: (act
 
   return items
 }
-const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
+const showContextMenu = (tab: SelectableTabState, event: MouseEvent, hasSelectionTarget: boolean): void => {
   event.preventDefault()
   const hasSelection = tab.selectedPaths.length > 0
   const hasSelectionTargetSelection = hasSelectionTarget && hasSelection
+  const isFileTab = tab.kind === 'file'
   const wrap = (action: () => void): (() => void) => () => {
     hideContextMenu()
     action()
@@ -858,12 +1004,12 @@ const showContextMenu = (tab: FileTabState, event: MouseEvent, hasSelectionTarge
       { label: '复制', enabled: hasSelectionTargetSelection, action: wrap(() => void copySelectionToClipboard(tab)) },
       { label: '复制路径', enabled: hasSelectionTargetSelection, children: createCopyPathMenuItems(tab, hasSelectionTargetSelection, wrap) },
       { label: '剪切', enabled: hasSelectionTargetSelection, action: wrap(() => void cutSelectionToClipboard(tab)) },
-      { label: '复制并粘贴', enabled: hasSelectionTargetSelection, action: wrap(() => void duplicateSelection(tab, loadDirectory)) },
-      { label: '打压缩包', enabled: hasSelectionTargetSelection, action: wrap(() => showArchiveDialog(tab)) },
-      { label: '重命名', enabled: hasSelectionTargetSelection, action: wrap(() => void renameActiveItem(tab, loadDirectory, requestName)) },
-      { label: '删除', enabled: hasSelectionTargetSelection, action: wrap(() => void trashSelection(tab, loadDirectory)) },
-      { label: '粘贴', enabled: true, action: wrap(() => void pasteClipboardIntoTab(tab, loadDirectory)) },
-      { label: '新建文件夹', enabled: true, action: wrap(() => void createFolder(tab, loadDirectory, requestName)) }
+      { label: '复制并粘贴', enabled: isFileTab && hasSelectionTargetSelection, action: wrap(() => isFileTab && void duplicateSelection(tab, loadDirectory)) },
+      { label: '打压缩包', enabled: isFileTab && hasSelectionTargetSelection, action: wrap(() => isFileTab && showArchiveDialog(tab)) },
+      { label: '重命名', enabled: isFileTab && hasSelectionTargetSelection, action: wrap(() => isFileTab && void renameActiveItem(tab, loadDirectory, requestName)) },
+      { label: '删除', enabled: hasSelectionTargetSelection, action: wrap(() => void trashSelectableSelection(tab)) },
+      { label: '粘贴', enabled: isFileTab, action: wrap(() => isFileTab && void pasteClipboardIntoTab(tab, loadDirectory)) },
+      { label: '新建文件夹', enabled: isFileTab, action: wrap(() => isFileTab && void createFolder(tab, loadDirectory, requestName)) }
     ]
   }
 }
@@ -871,10 +1017,11 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   archive: () => showArchiveDialog(),
   clearSelection,
   closeTab: closeFocusedTab,
-  copy: () => runOnFocusedTab(copySelectionToClipboard),
+  copy: () => runOnFocusedSelectableTab(copySelectionToClipboard),
   copySelectedToSecondary: () => void copySelectedFileToSecondaryPane(),
   createTab: createTabInFocusedPane,
-  cut: () => runOnFocusedTab(cutSelectionToClipboard),
+  createSearchPane: (direction) => splitFocusedPane(direction, 'search'),
+  cut: () => runOnFocusedSelectableTab(cutSelectionToClipboard),
   goBack: () => void goBack(),
   goForward: () => void goForward(),
   goUp: () => void goUp(),
@@ -895,7 +1042,7 @@ const handleFileManagerKeydown = createKeyboardHandler(platform, {
   splitPane: splitFocusedPane,
   startQuickFilter,
   jumpToFavorite: jumpToFavoriteIndex,
-  trash: () => runOnFocusedTab((tab) => trashSelection(tab, loadDirectory))
+  trash: () => runOnFocusedSelectableTab(trashSelectableSelection)
 })
 const handleKeydown = (event: KeyboardEvent): void => {
   if (isShortcutHelpOpen.value) {
@@ -993,6 +1140,28 @@ const SplitNodeView = defineComponent({
             onCloseTab: closeTab,
             onCreateTab: createTerminalTabInPane,
             onSplitPane: splitFocusedPane
+          })
+        }
+        if (pane.kind === 'search') {
+          const tab = getActiveSearchTab(pane)
+          if (!tab) {
+            return null
+          }
+          return h(SearchPane, {
+            pane,
+            tab,
+            platform: platform.value,
+            focusState: getPaneFocusState(pane.id),
+            columns,
+            iconCache,
+            onFocus: focusPane,
+            onSwitchTab: switchTab,
+            onCloseTab: closeTab,
+            onSearch: runSearch,
+            onOpenEntry: openSearchEntry,
+            onSetSort: setSort,
+            onResizeColumn: startColumnResize,
+            onShowContextMenu: showContextMenu
           })
         }
         const tab = getActiveFileTab(pane)

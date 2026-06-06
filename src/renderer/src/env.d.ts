@@ -14,6 +14,13 @@ type DirectoryPayload = {
   entries: FileManagerEntry[]
 }
 
+type SearchPayload = {
+  path: string
+  query: string
+  entries: FileManagerEntry[]
+  truncated: boolean
+}
+
 type OpenPathResult =
   | {
       action: 'enter-directory'
@@ -105,6 +112,19 @@ type PersistedFileManagerLayout = {
         }>
         activeTabId: string
       }
+    | {
+        kind: 'search'
+        id: string
+        tabs: Array<{
+          kind: 'search'
+          id: string
+          searchPath: string
+          query: string
+          sortKey: 'name' | 'modifiedAt' | 'size'
+          sortDirection: 'asc' | 'desc'
+        }>
+        activeTabId: string
+      }
   >
   focusedPaneId: string
   secondaryPaneId: string | null
@@ -116,6 +136,7 @@ interface Window {
     fileManager: {
       getHomeDirectory: () => Promise<string>
       listDirectory: (directoryPath: string) => Promise<DirectoryPayload>
+      searchPaths: (searchPath: string, query: string) => Promise<SearchPayload>
       watchDirectories: (directoryPaths: string[]) => Promise<void>
       onDirectoryChanged: (handler: (directoryPath: string) => void) => () => void
       openPath: (targetPath: string) => Promise<OpenPathResult>

@@ -1,7 +1,11 @@
-import type { ArchiveCreationOptions, FileTabState } from './types'
+import type { ArchiveCreationOptions, FileTabState, SearchTabState } from './types'
 
 type LoadDirectory = (tab: FileTabState, directoryPath: string, pushHistory?: boolean) => Promise<void>
 type RequestName = (message: string, defaultValue?: string) => Promise<string | null>
+export type FileSelectionState = Pick<
+  FileTabState | SearchTabState,
+  'entries' | 'selectedPaths' | 'activePath' | 'selectionAnchorPath' | 'errorMessage'
+>
 export type CopyPathTextFormat =
   | 'standard'
   | 'windowsSlash'
@@ -12,12 +16,12 @@ export type CopyPathTextFormat =
   | 'fileName'
   | 'fileNameWithoutExtension'
 
-export const getSelectedEntries = (tab: FileTabState): FileManagerEntry[] =>
+export const getSelectedEntries = (tab: FileSelectionState): FileManagerEntry[] =>
   tab.selectedPaths
     .map((path) => tab.entries.find((entry) => entry.path === path))
     .filter((entry): entry is FileManagerEntry => Boolean(entry))
 
-export const getSelectedPaths = (tab: FileTabState): string[] => getSelectedEntries(tab).map((entry) => entry.path)
+export const getSelectedPaths = (tab: FileSelectionState): string[] => getSelectedEntries(tab).map((entry) => entry.path)
 
 const toWindowsSlashes = (path: string): string => path.replaceAll('/', '\\')
 
@@ -73,7 +77,7 @@ const formatEntryPathText = (entry: FileManagerEntry, format: CopyPathTextFormat
 }
 
 export const copySelectionPathsAsText = async (
-  tab: FileTabState,
+  tab: FileSelectionState,
   format: CopyPathTextFormat,
   homeDirectory = ''
 ): Promise<void> => {
@@ -96,7 +100,7 @@ const refreshAndSelect = async (tab: FileTabState, paths: string[], loadDirector
   tab.selectionAnchorPath = paths[0] ?? null
 }
 
-export const copySelectionToClipboard = async (tab: FileTabState): Promise<void> => {
+export const copySelectionToClipboard = async (tab: FileSelectionState): Promise<void> => {
   const selectedPaths = getSelectedPaths(tab)
 
   if (selectedPaths.length === 0) {
@@ -107,7 +111,7 @@ export const copySelectionToClipboard = async (tab: FileTabState): Promise<void>
   await window.electron.fileManager.writeClipboardPaths(selectedPaths, 'copy')
 }
 
-export const cutSelectionToClipboard = async (tab: FileTabState): Promise<void> => {
+export const cutSelectionToClipboard = async (tab: FileSelectionState): Promise<void> => {
   const selectedPaths = getSelectedPaths(tab)
 
   if (selectedPaths.length === 0) {
@@ -237,7 +241,7 @@ export const createFolder = async (
 }
 
 export const copySelectionToSecondary = async (
-  sourceTab: FileTabState,
+  sourceTab: FileSelectionState,
   targetTab: FileTabState | null,
   loadDirectory: LoadDirectory
 ): Promise<void> => {
@@ -264,9 +268,10 @@ export const copySelectionToSecondary = async (
 }
 
 export const moveSelectionToSecondary = async (
-  sourceTab: FileTabState,
+  sourceTab: FileSelectionState,
   targetTab: FileTabState | null,
-  loadDirectory: LoadDirectory
+  loadDirectory: LoadDirectory,
+  refreshSource?: () => Promise<void>
 ): Promise<void> => {
   const selectedPaths = getSelectedPaths(sourceTab)
 
@@ -284,7 +289,11 @@ export const moveSelectionToSecondary = async (
 
   try {
     const movedPaths = await window.electron.fileManager.movePathsToDirectory(selectedPaths, targetTab.currentPath)
-    await loadDirectory(sourceTab, sourceTab.currentPath, false)
+    if (refreshSource) {
+      await refreshSource()
+    } else if ('currentPath' in sourceTab) {
+      await loadDirectory(sourceTab, sourceTab.currentPath, false)
+    }
     await refreshAndSelect(targetTab, movedPaths, loadDirectory)
   } catch (error) {
     sourceTab.errorMessage = error instanceof Error ? error.message : '无法移动对象。'

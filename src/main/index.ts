@@ -25,6 +25,13 @@ type DirectoryPayload = {
   entries: FileManagerEntry[]
 }
 
+type SearchPayload = {
+  path: string
+  query: string
+  entries: FileManagerEntry[]
+  truncated: boolean
+}
+
 type DirectoryWatcherState = {
   sender: WebContents
   timers: Map<string, NodeJS.Timeout>
@@ -306,6 +313,106 @@ const getAvailableCopyPath = async (sourcePath: string, destinationDirectory: st
 
   throw new Error(`无法为 ${originalName} 找到可用名称`)
 }
+
+const maxSearchResults = 5000
+
+const escapeFindNamePattern = (value: string): string => value.replaceAll(/([*?[\]\\])/g, '\\$1')
+
+const createFileManagerEntry = async (targetPath: string): Promise<FileManagerEntry | null> => {
+  try {
+    const targetStats = await stat(targetPath)
+
+    if (!targetStats.isDirectory() && !targetStats.isFile()) {
+      return null
+    }
+
+    return {
+      name: basename(targetPath),
+      path: targetPath,
+      type: targetStats.isDirectory() ? 'directory' : 'file',
+      modifiedAt: targetStats.mtimeMs,
+      size: targetStats.isFile() ? targetStats.size : null
+    }
+  } catch {
+    return null
+  }
+}
+
+const runFindSearch = (searchPath: string, query: string): Promise<{ paths: string[]; truncated: boolean }> =>
+  new Promise((resolveSearch, rejectSearch) => {
+    const trimmedQuery = query.trim()
+
+    if (!trimmedQuery) {
+      resolveSearch({ paths: [], truncated: false })
+      return
+    }
+
+    const child = spawn('find', [
+      searchPath,
+      '(',
+      '-type',
+      'f',
+      '-o',
+      '-type',
+      'd',
+      ')',
+      '-iname',
+      `*${escapeFindNamePattern(trimmedQuery)}*`,
+      '-print0'
+    ])
+    const paths: string[] = []
+    let buffered = Buffer.alloc(0)
+    let truncated = false
+
+    const consumeBuffer = (buffer: Buffer): void => {
+      let start = 0
+
+      for (let index = 0; index < buffer.length; index += 1) {
+        if (buffer[index] !== 0) {
+          continue
+        }
+
+        const pathBuffer =
+          buffered.length > 0 ? Buffer.concat([buffered, buffer.subarray(start, index)]) : buffer.subarray(start, index)
+        buffered = Buffer.alloc(0)
+        start = index + 1
+
+        if (pathBuffer.length === 0) {
+          continue
+        }
+
+        paths.push(pathBuffer.toString())
+
+        if (paths.length >= maxSearchResults) {
+          truncated = true
+          child.kill()
+          return
+        }
+      }
+
+      if (start < buffer.length) {
+        buffered = buffered.length > 0
+          ? Buffer.concat([buffered, buffer.subarray(start)])
+          : buffer.subarray(start)
+      }
+    }
+
+    child.stdout.on('data', (chunk: Buffer) => consumeBuffer(chunk))
+    child.stderr.resume()
+    child.on('error', (error) => rejectSearch(new Error(`无法启动 find 命令：${error.message}`)))
+    child.on('close', (code, signal) => {
+      if (buffered.length > 0 && paths.length < maxSearchResults) {
+        paths.push(buffered.toString())
+      }
+
+      if (code === 0 || code === 1 || signal !== null || truncated) {
+        resolveSearch({ paths: [...new Set(paths)].slice(0, maxSearchResults), truncated })
+        return
+      }
+
+      rejectSearch(new Error(`find 命令退出，状态码 ${code}`))
+    })
+  })
 
 const getArchiveNameParts = (fileName: string): { extension: string; stem: string } => {
   if (fileName.toLowerCase().endsWith('.tar.gz')) {
@@ -957,25 +1064,7 @@ const registerFileManagerHandlers = (): void => {
     const directoryEntries = await readdir(directoryPath, { withFileTypes: true })
     const entries = await Promise.all(
       directoryEntries.map(async (entry): Promise<FileManagerEntry | null> => {
-        const entryPath = join(directoryPath, entry.name)
-
-        try {
-          const entryStats = await stat(entryPath)
-
-          if (!entryStats.isDirectory() && !entryStats.isFile()) {
-            return null
-          }
-
-          return {
-            name: entry.name,
-            path: entryPath,
-            type: entryStats.isDirectory() ? 'directory' : 'file',
-            modifiedAt: entryStats.mtimeMs,
-            size: entryStats.isFile() ? entryStats.size : null
-          }
-        } catch {
-          return null
-        }
+        return createFileManagerEntry(join(directoryPath, entry.name))
       })
     )
 
@@ -983,6 +1072,24 @@ const registerFileManagerHandlers = (): void => {
       path: directoryPath,
       parentPath: getParentPath(directoryPath),
       entries: entries.filter((entry): entry is FileManagerEntry => entry !== null)
+    }
+  })
+
+  ipcMain.handle('file-manager:search-paths', async (_, searchPath: string, query: string): Promise<SearchPayload> => {
+    const directoryStats = await stat(searchPath)
+
+    if (!directoryStats.isDirectory()) {
+      throw new Error(`${searchPath} 不是文件夹`)
+    }
+
+    const result = await runFindSearch(searchPath, query)
+    const entries = await Promise.all(result.paths.map((targetPath) => createFileManagerEntry(targetPath)))
+
+    return {
+      path: searchPath,
+      query,
+      entries: entries.filter((entry): entry is FileManagerEntry => entry !== null),
+      truncated: result.truncated
     }
   })
 

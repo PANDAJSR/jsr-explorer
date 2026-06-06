@@ -1,6 +1,6 @@
-import type { FileTabState } from './types'
+import type { FileTabState, SearchTabState } from './types'
 
-export const sortEntriesForTab = (tab: FileTabState): FileManagerEntry[] => {
+export const sortEntriesForTab = (tab: FileTabState | SearchTabState): FileManagerEntry[] => {
   return [...tab.entries].sort((left, right) => {
     if (tab.sortKey === 'size' && left.type !== right.type) {
       return left.type === 'directory' ? -1 : 1

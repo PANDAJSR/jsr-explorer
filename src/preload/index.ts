@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electron', {
   fileManager: {
     getHomeDirectory: () => ipcRenderer.invoke('file-manager:get-home-directory'),
     listDirectory: (directoryPath: string) => ipcRenderer.invoke('file-manager:list-directory', directoryPath),
+    searchPaths: (searchPath: string, query: string) =>
+      ipcRenderer.invoke('file-manager:search-paths', searchPath, query),
     watchDirectories: (directoryPaths: string[]) => ipcRenderer.invoke('file-manager:watch-directories', directoryPaths),
     onDirectoryChanged: (handler: (directoryPath: string) => void) => {
       const listener = (_: IpcRendererEvent, directoryPath: string): void => handler(directoryPath)

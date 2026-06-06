@@ -1,4 +1,4 @@
-import type { FilePaneState, FileTabState, TerminalPaneState, TerminalTabState } from './types'
+import type { FilePaneState, FileTabState, SearchPaneState, SearchTabState, TerminalPaneState, TerminalTabState } from './types'
 
 export const createStateFactory = () => {
   let nextPaneId = 1
@@ -56,6 +56,37 @@ export const createStateFactory = () => {
     sortDirection: sourceTab.sortDirection
   })
 
+  const createSearchTab = (searchPath: string, query = '', id = `tab-${nextTabId++}`): SearchTabState => {
+    reserveNumericId(id, 'tab')
+
+    return {
+      kind: 'search',
+      id,
+      searchPath,
+      query,
+      entries: [],
+      selectedPaths: [],
+      activePath: null,
+      selectionAnchorPath: null,
+      errorMessage: '',
+      isLoading: false,
+      sortKey: 'name',
+      sortDirection: 'asc',
+      loadSequence: 0,
+      searchedQuery: '',
+      isTruncated: false
+    }
+  }
+
+  const cloneSearchTab = (sourceTab: SearchTabState): SearchTabState => ({
+    ...createSearchTab(sourceTab.searchPath, sourceTab.query),
+    entries: [...sourceTab.entries],
+    sortKey: sourceTab.sortKey,
+    sortDirection: sourceTab.sortDirection,
+    searchedQuery: sourceTab.searchedQuery,
+    isTruncated: sourceTab.isTruncated
+  })
+
   const createTerminalTab = (cwd: string, id = `tab-${nextTabId++}`): TerminalTabState => {
     reserveNumericId(id, 'tab')
 
@@ -103,9 +134,29 @@ export const createStateFactory = () => {
     }
   }
 
+  const createSearchPane = (searchPath: string, query = '', id = `pane-${nextPaneId++}`, tabId?: string): SearchPaneState => {
+    reserveNumericId(id, 'pane')
+    if (tabId) {
+      reserveNumericId(tabId, 'tab')
+    }
+    const tab = createSearchTab(searchPath, query, tabId)
+
+    return {
+      kind: 'search',
+      id,
+      isClosing: false,
+      enterFrom: null,
+      tabs: [tab],
+      activeTabId: tab.id
+    }
+  }
+
   return {
+    cloneSearchTab,
     cloneTabForPath,
     createPane,
+    createSearchPane,
+    createSearchTab,
     createTab,
     createTerminalPane,
     createTerminalTab

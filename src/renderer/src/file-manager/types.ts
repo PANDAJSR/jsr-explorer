@@ -84,6 +84,24 @@ export type FileTabState = {
   loadSequence: number
 }
 
+export type SearchTabState = {
+  kind: 'search'
+  id: string
+  searchPath: string
+  query: string
+  entries: FileManagerEntry[]
+  selectedPaths: string[]
+  activePath: string | null
+  selectionAnchorPath: string | null
+  errorMessage: string
+  isLoading: boolean
+  sortKey: SortKey
+  sortDirection: SortDirection
+  loadSequence: number
+  searchedQuery: string
+  isTruncated: boolean
+}
+
 export type TerminalTabState = {
   kind: 'terminal'
   id: string
@@ -111,7 +129,16 @@ export type TerminalPaneState = {
   activeTabId: string
 }
 
-export type PaneState = FilePaneState | TerminalPaneState
+export type SearchPaneState = {
+  kind: 'search'
+  id: string
+  isClosing: boolean
+  enterFrom: 'right' | 'bottom' | null
+  tabs: SearchTabState[]
+  activeTabId: string
+}
+
+export type PaneState = FilePaneState | TerminalPaneState | SearchPaneState
 
 export type SplitNode =
   | {
@@ -142,6 +169,15 @@ export type PersistedTerminalTabLayout = {
   title: string
 }
 
+export type PersistedSearchTabLayout = {
+  kind: 'search'
+  id: string
+  searchPath: string
+  query: string
+  sortKey: SortKey
+  sortDirection: SortDirection
+}
+
 export type PersistedFilePaneLayout = {
   kind: 'files'
   id: string
@@ -156,7 +192,14 @@ export type PersistedTerminalPaneLayout = {
   activeTabId: string
 }
 
-export type PersistedPaneLayout = PersistedFilePaneLayout | PersistedTerminalPaneLayout
+export type PersistedSearchPaneLayout = {
+  kind: 'search'
+  id: string
+  tabs: PersistedSearchTabLayout[]
+  activeTabId: string
+}
+
+export type PersistedPaneLayout = PersistedFilePaneLayout | PersistedTerminalPaneLayout | PersistedSearchPaneLayout
 
 export type PersistedFileManagerLayout = {
   version: 1

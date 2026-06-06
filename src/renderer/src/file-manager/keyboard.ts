@@ -8,6 +8,7 @@ type KeyboardActions = {
   createTab: () => void
   closeTab: () => void
   copy: () => void
+  createSearchPane: (direction: SplitDirection) => void
   goBack: () => void
   goForward: () => void
   goUp: () => void
@@ -22,7 +23,7 @@ type KeyboardActions = {
   rename: () => void
   showFavoritesManager: () => void
   showShortcutHelp: () => void
-  splitPane: (direction: SplitDirection, kind: 'files' | 'terminal') => void
+  splitPane: (direction: SplitDirection, kind: 'files' | 'terminal' | 'search') => void
   startQuickFilter: (initialQuery: string) => void
   jumpToFavorite: (index: number) => void
   trash: () => void
@@ -37,6 +38,12 @@ const isTextEditingEvent = (event: KeyboardEvent): boolean => {
 export const createKeyboardHandler = (platform: Ref<Platform>, actions: KeyboardActions) => {
   return (event: KeyboardEvent): void => {
     const primaryModifier = platform.value === 'darwin' ? event.metaKey : event.ctrlKey
+
+    if (primaryModifier && !event.altKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      actions.createSearchPane(event.shiftKey ? 'vertical' : 'horizontal')
+      return
+    }
 
     if (!isTextEditingEvent(event) && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.altKey) {
       if (!primaryModifier) {

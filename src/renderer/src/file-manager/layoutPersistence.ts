@@ -4,6 +4,8 @@ import type {
   PersistedFilePaneLayout,
   PersistedFileTabLayout,
   PersistedPaneLayout,
+  PersistedSearchPaneLayout,
+  PersistedSearchTabLayout,
   PersistedTerminalPaneLayout,
   PersistedTerminalTabLayout,
   SortDirection,
@@ -77,6 +79,35 @@ const normalizeTerminalTab = (value: unknown): PersistedTerminalTabLayout | null
   }
 }
 
+const normalizeSearchTab = (value: unknown): PersistedSearchTabLayout | null => {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'search' ||
+    typeof value.id !== 'string' ||
+    typeof value.searchPath !== 'string'
+  ) {
+    return null
+  }
+
+  if (value.searchPath.length === 0) {
+    return null
+  }
+
+  const sortKey = sortKeys.has(value.sortKey as SortKey) ? (value.sortKey as SortKey) : 'name'
+  const sortDirection = sortDirections.has(value.sortDirection as SortDirection)
+    ? (value.sortDirection as SortDirection)
+    : 'asc'
+
+  return {
+    kind: 'search',
+    id: value.id,
+    searchPath: value.searchPath,
+    query: typeof value.query === 'string' ? value.query : '',
+    sortKey,
+    sortDirection
+  }
+}
+
 const normalizePane = (value: unknown): PersistedPaneLayout | null => {
   if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.tabs)) {
     return null
@@ -118,6 +149,24 @@ const normalizePane = (value: unknown): PersistedPaneLayout | null => {
           ? value.activeTabId
           : tabs[0].id
     } satisfies PersistedTerminalPaneLayout
+  }
+
+  if (value.kind === 'search') {
+    const tabs = value.tabs.map(normalizeSearchTab).filter((tab): tab is PersistedSearchTabLayout => tab !== null)
+
+    if (tabs.length === 0) {
+      return null
+    }
+
+    return {
+      kind: 'search',
+      id: value.id,
+      tabs,
+      activeTabId:
+        typeof value.activeTabId === 'string' && tabs.some((tab) => tab.id === value.activeTabId)
+          ? value.activeTabId
+          : tabs[0].id
+    } satisfies PersistedSearchPaneLayout
   }
 
   return null
@@ -177,8 +226,9 @@ export const normalizeFileManagerLayout = (value: unknown): PersistedFileManager
 
   const focusedPaneId =
     typeof value.focusedPaneId === 'string' && paneIds.has(value.focusedPaneId) ? value.focusedPaneId : uniquePanes[0].id
+  const secondaryPaneCandidate = uniquePanes.find((pane) => pane.id === value.secondaryPaneId)
   const secondaryPaneId =
-    typeof value.secondaryPaneId === 'string' && paneIds.has(value.secondaryPaneId) ? value.secondaryPaneId : null
+    typeof value.secondaryPaneId === 'string' && secondaryPaneCandidate?.kind === 'files' ? value.secondaryPaneId : null
 
   return {
     version: layoutVersion,
@@ -213,6 +263,22 @@ export const createFileManagerLayoutSnapshot = (
           id: tab.id,
           cwd: tab.cwd,
           title: tab.title
+        }))
+      }
+    }
+
+    if (pane.kind === 'search') {
+      return {
+        kind: 'search',
+        id: pane.id,
+        activeTabId: pane.activeTabId,
+        tabs: pane.tabs.map((tab) => ({
+          kind: 'search',
+          id: tab.id,
+          searchPath: tab.searchPath,
+          query: tab.query,
+          sortKey: tab.sortKey,
+          sortDirection: tab.sortDirection
         }))
       }
     }
