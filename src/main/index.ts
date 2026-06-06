@@ -1133,16 +1133,32 @@ const registerFileManagerHandlers = (): void => {
     return pastedPaths
   })
 
-  ipcMain.on('file-manager:start-native-drag', (event, sourcePaths: string[]) => {
+  ipcMain.on('file-manager:start-native-drag', async (event, sourcePaths: string[]) => {
     const validPaths = sourcePaths.filter(Boolean)
 
     if (validPaths.length === 0) {
       return
     }
 
-    event.sender.startDrag({
+    const item = {
       file: validPaths[0],
-      files: validPaths,
+      ...(validPaths.length > 1 ? { files: validPaths } : {})
+    }
+
+    try {
+      const icon = await app.getFileIcon(validPaths[0], { size: 'normal' })
+
+      event.sender.startDrag({
+        ...item,
+        icon: icon.isEmpty() ? fallbackDragIcon : icon
+      })
+      return
+    } catch {
+      // Fall back to a generated non-empty image if the OS cannot provide an icon.
+    }
+
+    event.sender.startDrag({
+      ...item,
       icon: fallbackDragIcon
     })
   })
