@@ -17,6 +17,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",
+    "pinyin-pro": "^3.28.1",
     "three": "^0.184.0",
     "vue": "^3.5.16"
   },

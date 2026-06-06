@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { match } from 'pinyin-pro'
 import { computed, nextTick, ref, watch } from 'vue'
 import { filePathDragMimeType, hasDraggedFilePaths, readDraggedFilePaths } from '../file-manager/dragPayload'
 import { formatModifiedAt, formatSize, getPathLabel } from '../file-manager/formatters'
@@ -44,14 +45,28 @@ const pathSeparator = computed(() => (props.platform === 'win32' ? '\\' : '/'))
 
 const pathSegments = computed(() => getPathSegments(props.tab.currentPath, props.platform))
 const sortedEntries = computed(() => sortEntriesForTab(props.tab))
+const matchesQuickFilter = (entry: FileManagerEntry, query: string): boolean => {
+  const normalizedName = entry.name.toLocaleLowerCase()
+  const normalizedQuery = query.toLocaleLowerCase()
+
+  return (
+    normalizedName.includes(normalizedQuery) ||
+    match(entry.name, query, {
+      continuous: true,
+      insensitive: true,
+      space: 'ignore',
+      v: true
+    }) !== null
+  )
+}
 const quickFilterResults = computed(() => {
-  const query = props.tab.quickFilterQuery.trim().toLocaleLowerCase()
+  const query = props.tab.quickFilterQuery.trim()
 
   if (!query) {
     return []
   }
 
-  return sortedEntries.value.filter((entry) => entry.name.toLocaleLowerCase().includes(query))
+  return sortedEntries.value.filter((entry) => matchesQuickFilter(entry, query))
 })
 const quickFilterActiveIndex = computed(() =>
   props.tab.quickFilterActivePath
